@@ -1,3 +1,81 @@
 *.o
 *gnuboy
 config.*
+
+# CE build outputs
+AppMain.exe
+*.exe
+
+# UI font switch (make CE_FONT=...): comparison builds and the rebuild stamp
+/AppMain_shinonome.exe
+/AppMain_galmuri11.exe
+.font-*
+
+# Developer notes are not shipped; the docs below are.
+*.md
+!.github/README.md
+!sys/ce/README.md
+!sys/ce/LICENSING.md
+
+# ROMs (never distributed)
+*.gb
+*.gbc
+*.cgb
+*.dmg
+*.sgb
+*.sfc
+*.smc
+*.fig
+*.swc
+*.zip
+*.gz
+*.7z
+/*.xz
+
+# Save data, save states (gnuboy writes <rom>.000 etc.), screenshots
+*.sav
+*.srm
+*.rtc
+*.[0-9][0-9][0-9]
+Screenshots/
+
+# Runtime config and logs written next to AppMain.exe
+*.cfg
+*.log
+
+# Assets that must never be committed (see sys/ce/LICENSING.md)
+*.ttc
+*.ttf
+*.dll
+
+# Windows "downloaded from the internet" provenance metadata (NTFS ADS
+# materialised as real files under WSL)
+*:Zone.Identifier
+
+# Local tooling / IDE state
+.vs/
+.vscode/
+.idea/
+.claude/
+*.swp
+*~
+
+# Backups
+*.bak
+*.orig
+backup/
+backups/
+*_backup/
+
+# Mascot source images (the build uses sys/ce/icon/popgb_mascot.bmp)
+popgb_mascot_*.png
+
+# The app icon and the mascot bitmap in sys/ce/icon/ are shipped
+!sys/ce/icon/*.ico
+!sys/ce/icon/*.bmp
+# ...and the one mascot PNG shown at the top of .github/README.md
+!.github/images/popgb_mascot_C_kyoudai_4x.png
+# ...and the README screenshots (see "Screenshots/" above: keep them even
+# on a case-insensitive checkout)
+!.github/screenshots/
+!.github/screenshots/*.png

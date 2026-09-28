@@ -1,0 +1,132 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 daizu-coder
+#
+# Windows CE (SHARP Brain PW-G5200, cegcc arm-mingw32ce toolchain) build.
+# Hand-written, same convention as Makefile.win/Makefile.dos (no
+# configure/autoconf - see sys/ce/ for the backend this links against).
+#
+# Unlike every other gnuboy sys/ backend, this one does NOT `include
+# Rules`: Rules' own $(OBJS) pulls in main.o/menu.o/events.o/keytable.o/
+# rccmds.o/rckeys.o/rcfile.o/exports.o/debug.o/split.o/path.o, the
+# embedded-text-menu frontend this port's architecture rewrite replaced
+# outright with sys/ce/ce_main.c's own native dialogs. OBJS below is
+# gnuboy's GB/GBC hardware-emulation "core" only (CPU/PPU/APU/memory/
+# loader/save-state/decompression); everything under sys/ce/ is this
+# port's own frontend. See sys/ce/LICENSING.md for the per-file breakdown.
+#
+# Usage: make -f Makefile.ce
+#
+
+TOOLPREFIX = /opt/cegcc/bin/arm-mingw32ce-
+
+CC = $(TOOLPREFIX)gcc
+AS = $(CC)
+LD = $(CC)
+WINDRES = $(TOOLPREFIX)windres
+STRIP = $(TOOLPREFIX)strip
+
+# armv5te: matches the target device. mno-unaligned-access: this device's
+# CPU traps on unaligned word accesses.
+ARCH_FLAGS = -march=armv5te -mno-unaligned-access
+
+CFLAGS = $(ARCH_FLAGS) -O3
+LDFLAGS = -static-libgcc -lm
+ASFLAGS = -x assembler-with-cpp
+
+# No -DUSE_ASM: gnuboy's optional hand-optimized core (asm/i386) targets
+# x86 only, and ARM asm is best avoided here
+# without hardware verification - the plain C refresh_*/cpu paths are
+# used instead, same as every non-x86 gnuboy target.
+#
+# CE_PERF_DIAG (removed again 2026-08-24, session 19): a temporary
+# per-frame timing breakdown (CPU/LCD vs APU mix vs screen blit vs
+# audio ring copy vs doevents()'s own message-pump/Sleep/CeLog stages).
+# Brought back once already for session 16's audio-dropout
+# investigation, then removed; brought back a second time for session
+# 19 to get a quantitative before/after reading on BlitToScreen()'s
+# `blit`/`other` cost after session 18's changes there, and to verify
+# ce_log.c's open-once/fflush() rewrite actually killed the CeLog()
+# file-I/O spikes session 19 caught - both confirmed fixed on real
+# hardware, so this define is dead weight again. The `#ifdef
+# CE_PERF_DIAG` code itself, in
+# sys.h/emu.c/ce_main.c/ce_video.c/ce_audio.c, is left in place (still
+# compiles out cleanly) in case a future investigation wants the same
+# instrumentation a third time.
+SYS_DEFS = -DIS_LITTLE_ENDIAN -DALT_PATH_SEP
+
+INCS = -I.
+# compat/ comes first so its signal.h shadows this toolchain's own
+# broken one (see sys/ce/compat/signal.h) for every source file, core
+# included - the same technique the sister ports use
+# for the same __COREDLL__ #include_next problem (errno.h/direct.h).
+SYS_INCS = -I./sys/ce/compat -I./sys/ce
+
+MYCC = $(CC) $(CPPFLAGS) $(CFLAGS) $(INCS) $(SYS_INCS) $(SYS_DEFS)
+MYAS = $(AS) $(ASFLAGS) $(INCS) $(SYS_INCS) $(SYS_DEFS)
+
+XZ_OBJS = xz/xz_crc32.o xz/xz_crc64.o xz/xz_dec_lzma2.o xz/xz_dec_stream.o xz/xz_dec_bcj.o
+
+OBJS = lcd.o refresh.o lcdc.o palette.o cpu.o mem.o rtc.o hw.o sound.o \
+	fastmem.o loader.o save.o emu.o rcvars.o inflate.o miniz_tinfl.o \
+	$(XZ_OBJS)
+
+SYS_OBJS = sys/ce/ce_main.o sys/ce/ce_video.o sys/ce/ce_audio.o \
+	sys/ce/ce_input.o sys/ce/ce_lang.o sys/ce/ce_bmpfont.o sys/ce/ce_fileopen.o \
+	sys/ce/ce_config.o sys/ce/ce_log.o sys/ce/ce_sys.o sys/ce/ce_res.o
+
+TARGET = AppMain.exe
+
+# UI bitmap font (sys/ce/ce_bmpfont.c) - same switch as PopPCE (NitroGrafx-main,
+# 2026-09-27). Galmuri14 is the default; the others stay buildable:
+#   make                     Galmuri14 (default)  -> AppMain.exe
+#   make CE_FONT=shinonome   Shinonome 16dot      -> AppMain_shinonome.exe
+#   make CE_FONT=galmuri11   GalmuriMono11        -> AppMain_galmuri11.exe
+# sys/ce/ce_galmuri14.h / ce_galmuri11.h are copies of PopPCE's
+# tools/galmuri2c.py output. Only ce_bmpfont.o and ce_fileopen.o see the
+# define; the sys/ce/.font-<name> stamp makes them rebuild when CE_FONT changes.
+CE_FONT ?= galmuri14
+ifeq ($(CE_FONT),galmuri14)
+FONT_DEFS := -DCE_FONT_GALMURI14
+else ifeq ($(CE_FONT),shinonome)
+FONT_DEFS :=
+TARGET = AppMain_shinonome.exe
+else ifeq ($(CE_FONT),galmuri11)
+FONT_DEFS := -DCE_FONT_GALMURI11
+TARGET = AppMain_galmuri11.exe
+else
+$(error CE_FONT must be galmuri14, shinonome or galmuri11)
+endif
+FONT_STAMP := sys/ce/.font-$(CE_FONT)
+
+all: $(TARGET)
+
+$(FONT_STAMP):
+	rm -f sys/ce/.font-*
+	touch $@
+
+sys/ce/ce_bmpfont.o sys/ce/ce_fileopen.o: $(FONT_STAMP) sys/ce/ce_bmpfont.h sys/ce/ce_galmuri14.h sys/ce/ce_galmuri11.h sys/ce/ce_shinonome16.h
+sys/ce/ce_bmpfont.o sys/ce/ce_fileopen.o: CFLAGS += $(FONT_DEFS)
+
+.c.o:
+	$(MYCC) -c $< -o $@
+
+.s.o:
+	$(MYAS) -c $< -o $@
+
+%.o: %.rc
+	$(WINDRES) -F pe-arm-wince-little -I. -I./sys/ce -o $@ $<
+
+# The pattern rule above only tracks the .rc itself - rebuild when the
+# resource IDs, the embedded app icon or the main-menu mascot bitmap
+# (both in sys/ce/icon/) change too.
+sys/ce/ce_res.o: sys/ce/ce_resource.h sys/ce/icon/popgb.ico sys/ce/icon/popgb_mascot.bmp
+
+$(TARGET): $(OBJS) $(SYS_OBJS)
+	$(LD) $(OBJS) $(SYS_OBJS) -o $@ $(LDFLAGS)
+
+strip: $(TARGET)
+	$(STRIP) $(TARGET)
+
+clean:
+	rm -f sys/ce/.font-* AppMain_shinonome.exe AppMain_galmuri11.exe
+	rm -f $(TARGET) *.o sys/*/*.o asm/*/*.o xz/*.o
