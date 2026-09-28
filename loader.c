@@ -443,34 +443,53 @@ int sram_save()
 }
 
 
-void state_save(int n)
+/* Path of the most recent state_save()/state_load() attempt, success or
+ * not - loader_get_last_state_path() exposes it so a frontend can log
+ * exactly what was tried when ok==0 (fopen() failing is otherwise silent:
+ * no errno/GetLastError equivalent survives across this toolchain's CRT
+ * in a way worth relying on, so the path itself is the most useful thing
+ * to report). */
+static char s_lastStatePath[512];
+
+const char *loader_get_last_state_path(void)
+{
+	return s_lastStatePath;
+}
+
+int state_save(int n)
 {
 	FILE *f;
 	char *name;
+	int ok = 0;
 
 	if (n < 0) n = saveslot;
 	if (n < 0) n = 0;
 	name = malloc(strlen(saveprefix) + 5);
 	sprintf(name, "%s.%03d", saveprefix, n);
+	snprintf(s_lastStatePath, sizeof s_lastStatePath, "%s", name);
 
 	if ((f = fopen(name, "wb")))
 	{
 		savestate(f);
 		fclose(f);
+		ok = 1;
 	}
 	free(name);
+	return ok;
 }
 
 
-void state_load(int n)
+int state_load(int n)
 {
 	FILE *f;
 	char *name;
+	int ok = 0;
 
 	if (n < 0) n = saveslot;
 	if (n < 0) n = 0;
 	name = malloc(strlen(saveprefix) + 5);
 	sprintf(name, "%s.%03d", saveprefix, n);
+	snprintf(s_lastStatePath, sizeof s_lastStatePath, "%s", name);
 
 	if ((f = fopen(name, "rb")))
 	{
@@ -480,8 +499,10 @@ void state_load(int n)
 		pal_dirty();
 		sound_dirty();
 		mem_updatemap();
+		ok = 1;
 	}
 	free(name);
+	return ok;
 }
 
 void rtc_save()
@@ -519,6 +540,20 @@ static char *base(char *s)
 {
 	char *p;
 	p = strrchr(s, '/');
+#ifdef ALT_PATH_SEP
+	/* Windows-style paths (this port's CE frontend passes romfile as a
+	 * full "\Storage Card\..." path, never '/') - a real-hardware log
+	 * caught this function returning the whole path unstripped because
+	 * it only ever looked for '/', which then got glued onto savedir
+	 * as one path (e.g. "...\PopGB/\Storage Card\GB\Name.000"),
+	 * never matching any real file. ALT_PATH_SEP is already this
+	 * codebase's own marker for "this target uses backslash paths"
+	 * (see path.c). */
+	{
+		char *q = strrchr(s, '\\');
+		if (!p || (q && q > p)) p = q;
+	}
+#endif
 	if (p) return p+1;
 	return s;
 }

@@ -82,13 +82,25 @@ void emu_run()
 	lcd_begin();
 	for (;;)
 	{
+#ifdef CE_PERF_DIAG
+		ce_perf_begin(CE_PERF_SLOT_CPU_LCD);
+#endif
 		cpu_emulate(2280);
 		while (R_LY > 0 && R_LY < 144)
 			emu_step();
-		
+#ifdef CE_PERF_DIAG
+		ce_perf_end(CE_PERF_SLOT_CPU_LCD);
+#endif
+
 		vid_end();
 		rtc_tick();
+#ifdef CE_PERF_DIAG
+		ce_perf_begin(CE_PERF_SLOT_APU_MIX);
+#endif
 		sound_mix();
+#ifdef CE_PERF_DIAG
+		ce_perf_end(CE_PERF_SLOT_APU_MIX);
+#endif
 		if (!pcm_submit())
 		{
 			delay = framelen - sys_elapsed(timer);
@@ -99,11 +111,17 @@ void emu_run()
 		if (paused) return;
 		vid_begin();
 		if (framecount) { if (!--framecount) die("finished\n"); }
+#ifdef CE_PERF_DIAG
+		ce_perf_begin(CE_PERF_SLOT_CPU_LCD);
+#endif
 		if (!(R_LCDC & 0x80))
 			cpu_emulate(32832);
-		
+
 		while (R_LY > 0) /* wait for next frame */
 			emu_step();
+#ifdef CE_PERF_DIAG
+		ce_perf_end(CE_PERF_SLOT_CPU_LCD);
+#endif
 	}
 }
 

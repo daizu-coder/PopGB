@@ -54,11 +54,13 @@ int rc_getint_n(int i);
 float rc_getfloat_n(int i);
 int *rc_getvec_n(int i);
 char *rc_getstr_n(int i);
+void *rc_getmem_n(int i);
 
 int rc_getint(char *name);
 float rc_getfloat(char *name);
 int *rc_getvec(char *name);
 char *rc_getstr(char *name);
+void *rc_getmem(char *name);
 
 int rc_command(char *line);
 int rc_sourcefile(char *filename);
