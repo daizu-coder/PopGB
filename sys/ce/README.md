@@ -64,6 +64,8 @@ ROM・セーブファイルとも、フォルダ名・ファイル名に日本�
 
 - SHARP Brain PW-G5200
 
+PopGBA を CeOpener や CERestorer から起動すると、PW-G5300 で、終了後に画面が真っ暗になる、または操作を受け付けなくなることがありました。USB ケーブルと電池を抜いてから入れ直すと戻りました。PopGB での動作は確かめていません。
+
 ## クレジット
 
 - **gnuboy** GB / GBC エミュレーションコア — 復活版の gnuboy 1.0.3 / 1.0.4 系列。原作者は **Laguna** 氏・**Gilgamesh** 氏ほか(`docs/CREDITS`)。このリポジトリは **rofl0r** 氏が保守している版(<https://github.com/rofl0r/gnuboy>)を元にしています
