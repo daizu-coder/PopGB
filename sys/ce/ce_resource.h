@@ -31,7 +31,7 @@
 #define IDC_MM_SCREENSHOT 3012 /* 3011 is IDB_MAINMENU */
 
 /* Main-menu decoration bitmap (ce_res.rc's IDB_MAINMENU, from
- * sys/ce/icon/popgb_mascot.bmp - popgb_mascot_C_kyoudai.png alpha-composited
+ * sys/ce/icon/popgb_mascot.bmp - popgb_mascot_B_tsuushin.png alpha-composited
  * onto the menu's cream background #F0E1BC and saved as a 260x98 24bpp
  * BMP, since this device's GDI has no transparent blit). Drawn by
  * MainMenuDlgProc's WM_PAINT to the right of the IDC_MM_HINT text. */
