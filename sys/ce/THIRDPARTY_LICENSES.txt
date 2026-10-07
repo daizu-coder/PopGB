@@ -101,9 +101,9 @@ PopGB menu mascot and app icon (sys/ce/icon/)
 ---------------------------------------------
 Files: sys/ce/icon/popgb_mascot.bmp (the main-menu mascot),
 sys/ce/icon/popgb.ico (the AppMain.exe icon) and
-.github/images/popgb_mascot_C_kyoudai_4x.png (the same mascot at 4x,
-shown at the top of .github/README.md; not part of AppMain.exe).
-The mascot drawing shown in the main menu was made with AI (Claude)
+.github/images/popgb_mascot_C_kyoudai_4x.png (a different mascot
+drawing at 4x, shown at the top of .github/README.md; not part of
+AppMain.exe). Both mascot drawings were made with AI (Claude)
 for this port. The icon was made with AI (Claude) from the Pop series
 mascots.
 License: CC0 1.0 Universal (public domain dedication)
