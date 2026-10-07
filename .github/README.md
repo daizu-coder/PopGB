@@ -15,9 +15,9 @@
 </p>
 <p align="center"><sub>画面は lunoka 氏の <a href="https://lunoka.itch.io/mai-nurse">「Mai Nurse」</a> を PopGB の x1(等倍)表示で動かしたものです(作者の許可を得て掲載。下の「クレジット」を参照)。</sub></p>
 
-**非公式の移植版です。** PopGB は、ゲームボーイ / ゲームボーイカラーのエミュレータ [gnuboy](https://github.com/rofl0r/gnuboy)(Laguna 氏、Gilgamesh 氏ほか)を、SHARP の電子辞書 Brain PW-G5200(Windows CE)向けに移植したものです。gnuboy の公式版ではありません。gnuboy の作者やメンテナーはこの移植に関わっておらず、サポートもしていません。不具合の報告は、上流ではなくこちらにお願いします。
+**非公式の移植版です。** PopGB は、ゲームボーイ / ゲームボーイカラーのエミュレータ [gnuboy](https://github.com/rofl0r/gnuboy)(Laguna 氏、Gilgamesh 氏ほか)を、SHARP の電子辞書 Brain PW-G5300(Windows CE)向けに移植したものです。gnuboy の公式版ではありません。gnuboy の作者やメンテナーはこの移植に関わっておらず、サポートもしていません。不具合の報告は、上流ではなくこちらにお願いします。
 
-**Unofficial port.** PopGB is an unofficial port of the gnuboy Game Boy / Game Boy Color emulator (by Laguna, Gilgamesh and contributors) to the SHARP Brain PW-G5200 electronic dictionary (Windows CE). It is not an official gnuboy release, and the gnuboy authors and maintainers are not involved in it and do not support it. Please report PopGB issues here, not upstream.
+**Unofficial port.** PopGB is an unofficial port of the gnuboy Game Boy / Game Boy Color emulator (by Laguna, Gilgamesh and contributors) to the SHARP Brain PW-G5300 electronic dictionary (Windows CE). It is not an official gnuboy release, and the gnuboy authors and maintainers are not involved in it and do not support it. Please report PopGB issues here, not upstream.
 
 ## ダウンロード
 最新版は Releases のページからダウンロードできます。

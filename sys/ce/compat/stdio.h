@@ -6,7 +6,7 @@
  * #include_next here, unlike signal.h's __COREDLL__ situation): it pulls
  * in the toolchain's own stdio.h unchanged and only overrides fopen().
  *
- * Real-hardware bug (SHARP Brain PW-G5200, PopGB): the CRT's
+ * Real-hardware bug (SHARP Brain PW-G5300, PopGB): the CRT's
  * narrow fopen() has to convert its char* path to wchar_t* internally to
  * call CreateFileW - the only file API this OS actually has - and it
  * does that using CP_ACP. gnuboy's loader.c builds every save/SRAM/RTC/

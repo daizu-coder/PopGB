@@ -1,6 +1,6 @@
 # PopGB のライセンス
 
-PopGB は、ゲームボーイ / ゲームボーイカラーのエミュレータ [gnuboy](https://github.com/rofl0r/gnuboy)(Laguna 氏、Gilgamesh 氏ほか)を、SHARP Brain PW-G5200(Windows CE)向けに移植した、**非公式**の改変版です。gnuboy の作者やメンテナーはこの移植に関わっていません。
+PopGB は、ゲームボーイ / ゲームボーイカラーのエミュレータ [gnuboy](https://github.com/rofl0r/gnuboy)(Laguna 氏、Gilgamesh 氏ほか)を、SHARP Brain PW-G5300(Windows CE)向けに移植した、**非公式**の改変版です。gnuboy の作者やメンテナーはこの移植に関わっていません。
 
 ライセンスは2段になっています。
 

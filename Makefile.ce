@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 daizu-coder
 #
-# Windows CE (SHARP Brain PW-G5200, cegcc arm-mingw32ce toolchain) build.
+# Windows CE (SHARP Brain PW-G5300, cegcc arm-mingw32ce toolchain) build.
 # Hand-written, same convention as Makefile.win/Makefile.dos (no
 # configure/autoconf - see sys/ce/ for the backend this links against).
 #
