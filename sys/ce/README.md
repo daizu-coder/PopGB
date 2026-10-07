@@ -52,7 +52,7 @@ make -f Makefile.ce clean && make -f Makefile.ce && make -f Makefile.ce strip
 
 - ROM ファイルは SD カード上に置いてください。アプリ内の「Open ROM…」から選べます
 - `index.din` をこの名前で置くと、そのフォルダが [追加アプリ・動画] に一覧表示されます
-- 設定ファイル `PopGB.cfg` は、`AppMain.exe` と同じフォルダに作られます。設定が無い状態での初回起動時の既定値は、UI 言語=日本語、デバッグログ=OFF、画面の表示倍率=Full です
+- 設定ファイル `PopGB.cfg` は、`AppMain.exe` と同じフォルダに作られます。設定ファイルが無いときの既定値は、UI 言語=日本語、デバッグログ=OFF、画面の表示倍率=Full です
 - `PopGB_debug.log` は Video Config で「デバッグログを有効にする」を ON にしたときのみ生成されます(既定は OFF)
 - セーブデータ(`.sav`)とステートセーブのファイルは、ROM と同じフォルダに作られます
 
