@@ -26,6 +26,18 @@
 #include "sound.h"
 #include "sys.h"
 
+#ifdef UNDER_CE
+#include "ce_log.h"
+#include "ce_sys.h"
+#define SAVE_LOG CeLog
+#else
+#define SAVE_LOG(...) ((void)0)
+/* No way to check a file without opening it: "present" here just means
+ * "try fopen()", and a failed fopen() counts as no file, as before. */
+#define SYS_FILE_ABSENT   0
+#define SYS_FILE_PRESENT  1
+#endif
+
 static int mbc_table[256] =
 {
 	0, 1, 1, 1, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 3,
@@ -91,6 +103,32 @@ static char *romfile;
 static char *sramfile;
 static char *rtcfile;
 static char *saveprefix;
+
+/* sramfile/rtcfile/statefile are the whole ROM file name, extension
+ * included, plus .srm / .rtc / .state (Zelda.DX.gbc -> Zelda.DX.gbc.srm),
+ * the same names as the sister Pop* ports. Up to PopGB v1.0.3 the saves
+ * were saveprefix - the ROM file name cut at its first '.' - plus .sav /
+ * .rtc / .000. A legacy file is only read, and only while the new one
+ * doesn't exist; it is never written or removed. legacyrtcfile is NULL
+ * when it is the same name as rtcfile. State slots other than 0 (unused
+ * by the CE frontend) keep saveprefix + .001, .002, ... */
+static char *statefile;
+static char *legacysramfile;
+static char *legacyrtcfile;
+
+/* The cartridge RAM as the .srm/.sav file held it when it was last read
+ * or written, or (while there is no save file) as it was right after
+ * loading - sram_save_if_changed() skips the write while the RAM still
+ * matches it. */
+static byte *sram_shadow;
+static int sram_shadow_valid;
+/* 1 while this game has a save file (.srm, or a legacy .sav). */
+static int sram_file_exists;
+/* 1 while this game has a .rtc file (new or legacy name). */
+static int rtc_file_exists;
+/* 0 when the .rtc is there but couldn't be read in full - the clock is
+ * then never written for this ROM, same as ram.loaded for the SRAM. */
+static int rtc_save_ok;
 
 static char *savename;
 static char *savedir;
@@ -408,38 +446,164 @@ int rom_load_simple(char *fn) {
 	return rom_load();
 }
 
+/* Reads the save into the cartridge RAM. ram.loaded is the "saving is
+ * allowed for this ROM" flag: it is set when the save was read in full,
+ * or when there is no save file at all (a new game). When the file is
+ * there but can't be opened or read in full, it stays 0 and nothing is
+ * ever written for this ROM, so the file isn't overwritten with whatever
+ * the RAM happened to hold. */
 int sram_load()
 {
 	FILE *f;
+	char *path = sramfile;
+	int state, size, got;
+
+	ram.loaded = 0;
+	sram_file_exists = 0;
+	sram_shadow_valid = 0;
 
 	if (!mbc.batt || !sramfile || !*sramfile) return -1;
 
-	/* Consider sram loaded at this point, even if file doesn't exist */
-	ram.loaded = 1;
+	size = 8192 * mbc.ramsize;
+	free(sram_shadow);
+	sram_shadow = malloc(size);
 
-	f = fopen(sramfile, "rb");
-	if (!f) return -1;
-	fread(ram.sbank, 8192, mbc.ramsize, f);
+#ifdef UNDER_CE
+	state = sys_file_state(sramfile);
+	if (state == SYS_FILE_ABSENT && legacysramfile)
+	{
+		state = sys_file_state(legacysramfile);
+		path = legacysramfile;
+	}
+	if (state == SYS_FILE_UNKNOWN)
+	{
+		SAVE_LOG("sram_load: can't tell whether %s exists - saving is off for this ROM", path);
+		return -1;
+	}
+#else
+	state = SYS_FILE_PRESENT;
+#endif
+	if (state == SYS_FILE_ABSENT)
+	{
+		SAVE_LOG("sram_load: no save file yet: %s", sramfile);
+		ram.loaded = 1;
+		goto remember;
+	}
+
+	f = fopen(path, "rb");
+	if (!f)
+	{
+#ifdef UNDER_CE
+		SAVE_LOG("sram_load: %s is there but can't be opened (err=%lu) - saving is off for this ROM",
+			path, sys_last_error());
+		return -1;
+#else
+		/* No way to tell "absent" from "can't open" here - same as
+		 * before: treat it as a new game. */
+		ram.loaded = 1;
+		goto remember;
+#endif
+	}
+	got = fread(ram.sbank, 1, size, f);
 	fclose(f);
-	
-	return 0;
+	if (got != size)
+	{
+		SAVE_LOG("sram_load: read only %d of %d bytes from %s - saving is off for this ROM",
+			got, size, path);
+		return -1;
+	}
+	SAVE_LOG("sram_load: read %d bytes from %s", got, path);
+	ram.loaded = 1;
+	sram_file_exists = 1;
+
+remember:
+	if (sram_shadow)
+	{
+		memcpy(sram_shadow, ram.sbank, size);
+		sram_shadow_valid = 1;
+	}
+	return sram_file_exists ? 0 : -1;
 }
 
 
+static void rtc_write_file(void)
+{
+	FILE *f;
+	if (!rtc.batt || !rtcfile || !rtc_save_ok) return;
+	if (!(f = fopen(rtcfile, "wb")))
+	{
+		SAVE_LOG("rtc_save: can't open %s for writing", rtcfile);
+		return;
+	}
+	rtc_save_internal(f);
+	fclose(f);
+	rtc_file_exists = 1;
+	SAVE_LOG("rtc_save: wrote %s", rtcfile);
+}
+
+/* Writes the cartridge RAM to the .srm file, and the clock to the .rtc
+ * file with it (a clock cartridge's save and clock belong together). */
 int sram_save()
 {
 	FILE *f;
+	int size, wrote, closeErr;
 
 	/* If we crash before we ever loaded sram, DO NOT SAVE! */
 	if (!mbc.batt || !sramfile || !ram.loaded || !mbc.ramsize)
 		return -1;
-	
+
+	size = 8192 * mbc.ramsize;
 	f = fopen(sramfile, "wb");
-	if (!f) return -1;
-	fwrite(ram.sbank, 8192, mbc.ramsize, f);
-	fclose(f);
-	
-	return 0;
+	if (!f)
+	{
+		sram_shadow_valid = 0;
+		SAVE_LOG("sram_save: can't open %s for writing", sramfile);
+		return -1;
+	}
+	wrote = fwrite(ram.sbank, 1, size, f);
+	closeErr = fclose(f);
+	sram_file_exists = 1; /* "wb" created or truncated it, even if the write then failed */
+	if (wrote == size && closeErr == 0 && sram_shadow)
+	{
+		memcpy(sram_shadow, ram.sbank, size);
+		sram_shadow_valid = 1;
+	}
+	else
+		sram_shadow_valid = 0;
+	SAVE_LOG("sram_save: wrote %d of %d bytes to %s", wrote, size, sramfile);
+
+	rtc_write_file();
+	return (wrote == size && closeErr == 0) ? 0 : -1;
+}
+
+/* Exit (and die()): writes only when the cartridge RAM differs from what
+ * the save file holds - or, while there is none, from what it held right
+ * after loading. Returns 1 if it wrote (the .rtc with it), 0 if not. */
+int sram_save_if_changed(void)
+{
+	if (!mbc.batt || !sramfile || !ram.loaded || !mbc.ramsize)
+		return 0;
+	if (sram_shadow_valid &&
+	    memcmp(sram_shadow, ram.sbank, 8192 * mbc.ramsize) == 0)
+	{
+		SAVE_LOG("sram_save_if_changed: unchanged, not written");
+		return 0;
+	}
+	sram_save();
+	return 1;
+}
+
+/* Opening the menu and switching ROMs: always writes while the game has
+ * a save file; while it doesn't, only once the game has changed its RAM,
+ * so a game that never saves gets no file. Returns 1 if it wrote. */
+int sram_save_checkpoint(void)
+{
+	if (!mbc.batt || !sramfile || !ram.loaded || !mbc.ramsize)
+		return 0;
+	if (!sram_file_exists)
+		return sram_save_if_changed();
+	sram_save();
+	return 1;
 }
 
 
@@ -456,6 +620,17 @@ const char *loader_get_last_state_path(void)
 	return s_lastStatePath;
 }
 
+/* Slot 0 is statefile; the other slots keep the legacy saveprefix.NNN
+ * names. Returns a malloc()ed path. */
+static char *state_name(int n)
+{
+	char *name;
+	if (n == 0) return strdup(statefile);
+	name = malloc(strlen(saveprefix) + 5);
+	sprintf(name, "%s.%03d", saveprefix, n);
+	return name;
+}
+
 int state_save(int n)
 {
 	FILE *f;
@@ -464,8 +639,7 @@ int state_save(int n)
 
 	if (n < 0) n = saveslot;
 	if (n < 0) n = 0;
-	name = malloc(strlen(saveprefix) + 5);
-	sprintf(name, "%s.%03d", saveprefix, n);
+	name = state_name(n);
 	snprintf(s_lastStatePath, sizeof s_lastStatePath, "%s", name);
 
 	if ((f = fopen(name, "wb")))
@@ -487,8 +661,26 @@ int state_load(int n)
 
 	if (n < 0) n = saveslot;
 	if (n < 0) n = 0;
-	name = malloc(strlen(saveprefix) + 5);
-	sprintf(name, "%s.%03d", saveprefix, n);
+	name = state_name(n);
+
+	/* Slot 0: while there is no .state, read the legacy .000 instead
+	 * (never written or removed). A .state that is there but can't be
+	 * opened is a failed load, not a reason to fall back. */
+	if (n == 0)
+	{
+#ifdef UNDER_CE
+		int state = sys_file_state(name);
+		if (state == SYS_FILE_ABSENT)
+#else
+		if (!(f = fopen(name, "rb")) || fclose(f))
+#endif
+		{
+			free(name);
+			name = malloc(strlen(saveprefix) + 5);
+			sprintf(name, "%s.%03d", saveprefix, 0);
+			SAVE_LOG("state_load: no .state yet, trying %s", name);
+		}
+	}
 	snprintf(s_lastStatePath, sizeof s_lastStatePath, "%s", name);
 
 	if ((f = fopen(name, "rb")))
@@ -505,30 +697,95 @@ int state_load(int n)
 	return ok;
 }
 
+/* Writes the clock only while the game already has a .srm or a .rtc, so
+ * a game that never saves gets neither. A clock cartridge without
+ * battery-backed RAM (mbc.batt == 0, e.g. type 0x0F) has no .srm to go
+ * by, so its clock is written as before. */
 void rtc_save()
 {
-	FILE *f;
 	if (!rtc.batt) return;
-	if (!(f = fopen(rtcfile, "wb"))) return;
-	rtc_save_internal(f);
-	fclose(f);
+	if (!rtc_file_exists && !sram_file_exists && mbc.batt)
+	{
+		SAVE_LOG("rtc_save: no .srm/.rtc yet, not written");
+		return;
+	}
+	rtc_write_file();
 }
 
 void rtc_load()
 {
 	FILE *f;
-	if (!rtc.batt) return;
-	if (!(f = fopen(rtcfile, "r"))) return;
-	rtc_load_internal(f);
+	char *path = rtcfile;
+	int state = SYS_FILE_PRESENT, batt = rtc.batt, n;
+
+	/* Start every ROM from a stopped-at-zero clock, so a clock game with
+	 * no .rtc doesn't carry on with the previous game's clock. */
+	memset(&rtc, 0, sizeof rtc);
+	rtc.batt = batt;
+	rtc_file_exists = 0;
+	rtc_save_ok = 1;
+
+	if (!rtc.batt || !rtcfile) return;
+
+#ifdef UNDER_CE
+	state = sys_file_state(rtcfile);
+	if (state == SYS_FILE_ABSENT && legacyrtcfile)
+	{
+		state = sys_file_state(legacyrtcfile);
+		path = legacyrtcfile;
+	}
+	if (state == SYS_FILE_UNKNOWN)
+	{
+		SAVE_LOG("rtc_load: can't tell whether %s exists - the clock is not saved for this ROM", path);
+		rtc_save_ok = 0;
+		return;
+	}
+#endif
+	if (state == SYS_FILE_ABSENT)
+	{
+		SAVE_LOG("rtc_load: no .rtc yet: %s", rtcfile);
+		return;
+	}
+
+	if (!(f = fopen(path, "r")))
+	{
+#ifdef UNDER_CE
+		SAVE_LOG("rtc_load: %s is there but can't be opened (err=%lu) - the clock is not saved for this ROM",
+			path, sys_last_error());
+		rtc_save_ok = 0;
+#endif
+		return;
+	}
+	n = rtc_load_internal(f);
 	fclose(f);
+	if (n != 8)
+	{
+		SAVE_LOG("rtc_load: read only %d of 8 values from %s - the clock is not saved for this ROM",
+			n, path);
+		rtc_save_ok = 0;
+		return;
+	}
+	rtc_file_exists = 1;
+	SAVE_LOG("rtc_load: read %s", path);
 }
 
 #define FREENULL(X) do { free(X); X = 0; } while(0)
 void loader_unload()
 {
-	sram_save();
+	/* Switching ROMs: the .rtc goes with the .srm when that is written,
+	 * otherwise on its own (rtc_save() still needs a .srm or .rtc). */
+	if (!sram_save_checkpoint())
+		rtc_save();
+	ram.loaded = 0;
+	sram_file_exists = rtc_file_exists = 0;
+	sram_shadow_valid = 0;
+	if (sram_shadow) FREENULL(sram_shadow);
 	if (romfile) FREENULL(romfile);
 	if (sramfile) FREENULL(sramfile);
+	if (rtcfile) FREENULL(rtcfile);
+	if (statefile) FREENULL(statefile);
+	if (legacysramfile) FREENULL(legacysramfile);
+	if (legacyrtcfile) FREENULL(legacyrtcfile);
 	if (saveprefix) FREENULL(saveprefix);
 	if (rom.bank) FREENULL(rom.bank);
 	if (ram.sbank) FREENULL(ram.sbank);
@@ -570,14 +827,22 @@ static char *ldup(char *s)
 
 static void cleanup()
 {
-	sram_save();
-	rtc_save();
+	if (!sram_save_if_changed())
+		rtc_save();
 	/* IDEA - if error, write emergency savestate..? */
+}
+
+static char *joinname(const char *prefix, const char *ext)
+{
+	char *n = malloc(strlen(prefix) + strlen(ext) + 1);
+	strcpy(n, prefix);
+	strcat(n, ext);
+	return n;
 }
 
 int loader_init(char *s)
 {
-	char *name, *p;
+	char *name, *newname = 0, *p, *newprefix;
 
 	sys_checkdir(savedir, 1); /* needs to be writable */
 
@@ -594,21 +859,28 @@ int loader_init(char *s)
 	else if (romfile && *base(romfile) && strcmp(romfile, "-"))
 	{
 		name = strdup(base(romfile));
+		newname = strdup(name);
 		p = strchr(name, '.');
 		if (p) *p = 0;
 	}
 	else name = ldup(rom.name);
+	if (!newname) newname = strdup(name);
 
 	saveprefix = malloc(strlen(savedir) + strlen(name) + 2);
 	sprintf(saveprefix, "%s/%s", savedir, name);
+	newprefix = malloc(strlen(savedir) + strlen(newname) + 2);
+	sprintf(newprefix, "%s/%s", savedir, newname);
 
-	sramfile = malloc(strlen(saveprefix) + 5);
-	strcpy(sramfile, saveprefix);
-	strcat(sramfile, ".sav");
+	sramfile = joinname(newprefix, ".srm");
+	rtcfile = joinname(newprefix, ".rtc");
+	statefile = joinname(newprefix, ".state");
+	legacysramfile = joinname(saveprefix, ".sav");
+	legacyrtcfile = joinname(saveprefix, ".rtc");
+	if (!strcmp(legacyrtcfile, rtcfile)) FREENULL(legacyrtcfile);
 
-	rtcfile = malloc(strlen(saveprefix) + 5);
-	strcpy(rtcfile, saveprefix);
-	strcat(rtcfile, ".rtc");
+	free(newprefix);
+	free(newname);
+	free(name);
 
 	sram_load();
 	rtc_load();

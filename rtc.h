@@ -24,7 +24,8 @@ void rtc_tick();
 
 #include <stdio.h>
 void rtc_save_internal(FILE *f);
-void rtc_load_internal(FILE *f);
+/* Returns fscanf()'s count: 8 when the whole .rtc line was read. */
+int rtc_load_internal(FILE *f);
 
 #endif
 

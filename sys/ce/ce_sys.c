@@ -28,6 +28,7 @@
 #include "defs.h"
 #include "rc.h"
 #include "ce_log.h"
+#include "ce_sys.h"
 
 /* cpu.c (kept unmodified - see the port's dev notes) unconditionally references
  * debug_trace/debug_disassemble() (`if (debug_trace) debug_disassemble(...)`
@@ -188,4 +189,43 @@ FILE *ce_fopen_utf8(const char *utf8path, const char *mode)
 	MultiByteToWideChar(CP_ACP, 0, mode, -1, wmode, 8);
 
 	return _wfopen(wpath, wmode);
+}
+
+/* See ce_sys.h - loader.c calls this before reading a save file, so that a
+ * file that is there but can't be opened (or read in full) turns saving
+ * off for that ROM instead of being treated as "no save yet" and later
+ * overwritten with whatever the cartridge RAM happens to hold. */
+int sys_file_state(const char *path)
+{
+	wchar_t wpath[MAX_PATH];
+	DWORD attr, err = 0;
+	int state;
+
+	if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, MAX_PATH))
+	{
+		CeLog("sys_file_state: path conversion failed, err=%lu: %s",
+		      (unsigned long)GetLastError(), path);
+		return SYS_FILE_UNKNOWN;
+	}
+
+	attr = GetFileAttributesW(wpath);
+	if (attr == 0xFFFFFFFF)
+	{
+		err = GetLastError();
+		state = (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND)
+		        ? SYS_FILE_ABSENT : SYS_FILE_UNKNOWN;
+	}
+	else
+		state = SYS_FILE_PRESENT;
+
+	CeLog("sys_file_state: GetFileAttributesW=0x%08lX err=%lu -> %s: %s",
+	      (unsigned long)attr, (unsigned long)err,
+	      state == SYS_FILE_PRESENT ? "present" :
+	      state == SYS_FILE_ABSENT ? "absent" : "unknown", path);
+	return state;
+}
+
+unsigned long sys_last_error(void)
+{
+	return (unsigned long)GetLastError();
 }

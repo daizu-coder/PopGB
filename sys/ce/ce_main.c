@@ -60,16 +60,6 @@ extern rcvar_t loader_exports[], lcd_exports[], rtc_exports[],
 	sound_exports[], vid_exports[], joy_exports[], pcm_exports[],
 	emu_exports[];
 
-/* loader.c defines these but only declares sram_save() in loader.h -
- * rtc_save() has no header declaration anywhere in the untouched core
- * (see the port's dev notes: loader.c is one of the "cpu周り無改修" files, so this
- * declares its existing external symbol here instead of editing that
- * header). Both are called directly (not via loader.c's own atexit()
- * cleanup, which never runs - see CeShutdown()'s comment below) so a
- * manual Exit and a crash-path die() both flush SRAM/RTC the same way
- * loader_unload()'s caller-triggered path already does. */
-extern void rtc_save(void);
-
 static HWND g_hwnd = NULL;
 static volatile int g_menuRequested = 0;
 static int g_romLoaded = 0;
@@ -94,20 +84,28 @@ static HWND CeFindTaskBar(void)
 	return FindWindowW(L"HHTaskBar", NULL);
 }
 
+/* Writes the cartridge save on exit, but only if the game changed it
+ * since it was last read or written (loader.c's sram_save_if_changed())
+ * - Exit from the main menu always comes right after the menu's own
+ * save. The clock is written either way (rtc_save() still needs the game
+ * to have a .srm or .rtc). */
+static void CeSaveOnExit(void)
+{
+	if (!sram_save_if_changed())
+		rtc_save();
+}
+
 /* Direct ExitProcess(), not a normal WinMain return / WM_CLOSE /
  * PostQuitMessage() chain (a real hang on this exact device/toolchain
  * was traced to that normal path) - which
  * means the CRT's own atexit() handlers (loader.c's cleanup(), wired up
- * by loader_init()'s atexit(cleanup) call) never run either. sram_save()/
- * rtc_save() are therefore called explicitly here before tearing down,
+ * by loader_init()'s atexit(cleanup) call) never run either. The save is
+ * therefore written explicitly here before tearing down (CeSaveOnExit()),
  * same as die() below. */
 static void CeShutdown(int code)
 {
 	if (g_romLoaded)
-	{
-		sram_save();
-		rtc_save();
-	}
+		CeSaveOnExit();
 
 	vid_close();
 	pcm_close();
@@ -125,8 +123,8 @@ static void CeShutdown(int code)
 /* stuff from defs.h - gnuboy's fatal-error path, called from lcd.c/
  * cpu.c/emu.c. main.c's own die() called exit(1) (letting atexit()
  * flush SRAM); this device's ExitProcess()-only shutdown discipline
- * (see CeShutdown() above) applies here too - sram_save()/rtc_save()
- * are called directly instead of relying on atexit(). */
+ * (see CeShutdown() above) applies here too - CeSaveOnExit() is called
+ * directly instead of relying on atexit(). */
 void die(char *fmt, ...)
 {
 	char msg[512];
@@ -141,10 +139,7 @@ void die(char *fmt, ...)
 	CeLog("die: %s", msg);
 
 	if (g_romLoaded)
-	{
-		sram_save();
-		rtc_save();
-	}
+		CeSaveOnExit();
 
 	MultiByteToWideChar(CP_ACP, 0, msg, -1, wmsg, 512);
 	MessageBoxW(g_hwnd, wmsg, CE_APP_TITLE, MB_OK | MB_ICONERROR);
@@ -170,7 +165,7 @@ static int LoadRom(const char *path)
 
 	/* Point loader.c's savedir rcvar at this ROM's own folder instead of
 	 * sys_initpath()'s default (this app's own .exe folder) - user
-	 * request: Save State/SRAM(.sav)/RTC(.rtc) files should live next to
+	 * request: Save State/SRAM(.srm)/RTC(.rtc) files should live next to
 	 * the ROM, not next to AppMain.exe. loader_init() below builds
 	 * saveprefix as "<savedir>/<romname>" (see loader.c), so this must be
 	 * set before that call, and it needs to be redone on every ROM load
@@ -1148,6 +1143,15 @@ static int ShowMainMenu(void)
 	int result;
 
 	pcm_pause(1); /* stop any still-queued audio immediately - nothing is producing more of it while the menu is up */
+
+	/* Save at every menu open, not only on exit and ROM switch - a real
+	 * power-off doesn't run CeShutdown() at all. Always writes while the
+	 * game has a save file; while it doesn't, only once the game has
+	 * changed its cartridge RAM, so a game that never saves gets no file
+	 * (loader.c's sram_save_checkpoint(), same as the sister PopGBA
+	 * v1.0.7). Nothing to save at the first menu, before any ROM. */
+	if (g_romLoaded)
+		sram_save_checkpoint();
 
 	/* Historically needed because GXOpenDisplay() (the old GAPI backend's
 	 * vid_init()) claimed exclusive full-screen access, and showing a

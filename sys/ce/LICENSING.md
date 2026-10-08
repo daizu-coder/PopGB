@@ -26,7 +26,8 @@ PopGB は、ゲームボーイ / ゲームボーイカラーのエミュレー�
 
 PopGB が変えた上流のファイルは次のものだけです。どれも Windows CE 用のフロントエンドから使うためのもので、ライセンスは変わりません。
 
-- `loader.c`、`loader.h`: `state_save()` / `state_load()` が成功したかどうかを返すようにした。試したパスを返す `loader_get_last_state_path()` を足した。`ALT_PATH_SEP` があるときは、`base()` が `\` でもパスを区切るようにした(Windows CE のパスでセーブの場所がおかしくなっていたため)
+- `loader.c`、`loader.h`: `state_save()` / `state_load()` が成功したかどうかを返すようにした。試したパスを返す `loader_get_last_state_path()` を足した。`ALT_PATH_SEP` があるときは、`base()` が `\` でもパスを区切るようにした(Windows CE のパスでセーブの場所がおかしくなっていたため)。セーブデータ・時計・ステートセーブを、ROM のファイル名に `.srm` / `.rtc` / `.state` を足した名前で書くようにした。中身が変わっていないときは書かない `sram_save_if_changed()` / `sram_save_checkpoint()` を足した。前の名前の `.sav` / `.rtc` / `.000` は、新しい名前のファイルが無いときだけ読むようにした。セーブのファイルがあるのに読めなかったときは、その ROM では保存しないようにした
+- `rtc.c`、`rtc.h`: `rtc_load_internal()` が読めた値の数を返すようにした(`.rtc` を読み切れなかったことを見分けるため)
 - `rc.h`: `rcvars.c` にある `rc_getmem()` / `rc_getmem_n()` の宣言を足した(宣言が抜けていたため)
 - `emu.c`、`sys.h`: 処理時間を測るための呼び出しを足した。`-DCE_PERF_DIAG` を付けたときだけコンパイルされ、ふだんのビルドでは何も変わらない
 - `.gitignore`: PopGB のビルドの生成物などを除外するように書き足した

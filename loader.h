@@ -21,6 +21,18 @@ int rom_load();
 int sram_load();
 int sram_save();
 
+/* Save checkpoints (see loader.c): sram_save_if_changed() writes only
+ * when the cartridge RAM differs from the save file (exit), and
+ * sram_save_checkpoint() always writes while the game has a save file
+ * but otherwise only once the RAM has changed (menu, ROM switch). Both
+ * return 1 if they wrote - the .rtc is then written with it - and 0 if
+ * not, in which case the caller can still write the clock alone with
+ * rtc_save(). */
+int sram_save_if_changed(void);
+int sram_save_checkpoint(void);
+void rtc_save(void);
+void rtc_load(void);
+
 int loader_init(char *s);
 void loader_unload(void);
 char *loader_get_error();

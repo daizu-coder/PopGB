@@ -100,10 +100,10 @@ void rtc_save_internal(FILE *f)
 		(long) time(0));
 }
 
-void rtc_load_internal(FILE *f)
+int rtc_load_internal(FILE *f)
 {
-	int rt = 0;
-	fscanf(
+	int rt = 0, n;
+	n = fscanf(
 		f, "%d %d %d %02d %02d %02d %02d\n%d\n",
 		&rtc.carry, &rtc.stop, &rtc.d,
 		&rtc.h, &rtc.m, &rtc.s, &rtc.t, &rt);
@@ -116,6 +116,7 @@ void rtc_load_internal(FILE *f)
 	rtc.carry &= 1;
 	if (rt) rt = (time(0) - rt) * 60;
 	if (syncrtc) while (rt-- > 0) rtc_tick();
+	return n;
 }
 
 
