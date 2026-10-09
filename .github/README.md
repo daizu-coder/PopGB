@@ -34,11 +34,12 @@ PopGB 全体は、上流の gnuboy と同じ条件の GNU General Public License
 
 「ゲームボーイ」「ゲームボーイカラー」「Game Boy」「Game Boy Color」「Nintendo」「任天堂」は任天堂の商標、「SHARP」「Brain」はシャープ株式会社の商標です。PopGB は、これらの権利者とは関係ありません。
 
+ライセンスの詳しい説明は [sys/ce/LICENSING.md](../sys/ce/LICENSING.md) にあります。
+
 ゲームの ROM は同梱していません。
 
-**使い方やビルドの説明は [sys/ce/README.md](../sys/ce/README.md)、ライセンスの詳しい説明は [sys/ce/LICENSING.md](../sys/ce/LICENSING.md) にあります。**
-
-このリポジトリは、上流の [rofl0r/gnuboy](https://github.com/rofl0r/gnuboy) のコミット `c367bb4` を元にしています。直下の `README` は上流の gnuboy の説明で、PopGB の説明ではありません。
+## ビルド方法、使用方法
+ビルド方法と使用方法は [sys/ce/README.md](../sys/ce/README.md) をご覧ください。
 
 ## クレジット
 
