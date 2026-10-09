@@ -32,14 +32,11 @@ Brainへのインストールは[アプリの起動方法](https://brain.fandom.
 ## ライセンスと商標
 PopGB 全体は、上流の gnuboy と同じ条件の GNU General Public License バージョン2(GPL-2.0)で配布します。
 
-「ゲームボーイ」「ゲームボーイカラー」「Game Boy」「Game Boy Color」「Nintendo」「任天堂」は任天堂の商標、「SHARP」「Brain」はシャープ株式会社の商標です。PopGB は、これらの権利者とは関係ありません。
-
-ライセンスの詳しい説明は [sys/ce/LICENSING.md](../sys/ce/LICENSING.md) にあります。
+「ゲームボーイ」「ゲームボーイカラー」「Game Boy」「Game Boy Color」「Nintendo」「任天堂」は任天堂の商標、「SHARP」「Brain」はシャープ株式会社の商標です。PopGB は、これらの権利者とは関係ありません。ライセンスの詳しい説明は [sys/ce/LICENSING.md](../sys/ce/LICENSING.md) にあります。
 
 ゲームの ROM は同梱していません。
 
-## ビルド方法、使用方法
-ビルド方法と使用方法は [sys/ce/README.md](../sys/ce/README.md) をご覧ください。
+## ビルド方法、使用方法 → [sys/ce/README.md](../sys/ce/README.md)
 
 ## クレジット
 
