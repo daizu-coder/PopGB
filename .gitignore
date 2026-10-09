@@ -16,6 +16,7 @@ AppMain.exe
 !.github/README.md
 !sys/ce/README.md
 !sys/ce/LICENSING.md
+!sys/ce/NOTES.md
 
 # ROMs (never distributed)
 *.gb
