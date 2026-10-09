@@ -27,16 +27,20 @@
 
 ## ビルド方法
 
-- SDK / ツールチェーン
-  * WSL(Windows 上の Linux)に入れた cegcc(`arm-mingw32ce-*` クロスコンパイラ)
-- ビルド手順(リポジトリ直下で実行)
+- ツール
+  * cegcc(`arm-mingw32ce-*`、`/opt/cegcc`)— Windows CE / ARM 向けのクロスコンパイラ。製作者は WSL(Windows 上の Linux)でビルドしています
+- サブモジュールは使っていません
+- 手順
+  * リポジトリ直下で `make -f Makefile.ce && make -f Makefile.ce strip` を実行します
+  * リポジトリ直下に `AppMain.exe` ができます(依存する DLL は `COREDLL.dll` だけ)
+  * 既定のフォントは Galmuri14 です。`make -f Makefile.ce CE_FONT=shinonome` で東雲 16 ドット版(`AppMain_shinonome.exe`)、`make -f Makefile.ce CE_FONT=galmuri11` で GalmuriMono11 版(`AppMain_galmuri11.exe`)も作れます。フォントは AppMain.exe に入っているので、フォントのファイルは要りません
 
 ```sh
-make -f Makefile.ce clean && make -f Makefile.ce && make -f Makefile.ce strip
+git clone https://github.com/daizu-coder/PopGB.git
+cd PopGB
+make -f Makefile.ce
+make -f Makefile.ce strip
 ```
-
-- 生成物はリポジトリ直下の `AppMain.exe`(依存 DLL は `COREDLL.dll` のみ)。UI が使うビットマップフォントはバイナリに埋め込み済み(`sys/ce/ce_galmuri14.h`、`sys/ce/ce_shinonome16.h`)なので、外部のフォントファイルは不要です
-- `make -f Makefile.ce CE_FONT=shinonome` で東雲 16 ドット、`make -f Makefile.ce CE_FONT=galmuri11` で GalmuriMono11 のメニュー文字の版(`AppMain_shinonome.exe` / `AppMain_galmuri11.exe`)も作れます
 
 ## 使用方法
 
