@@ -2,23 +2,24 @@
 /* Copyright (c) 2026 daizu-coder */
 /*
  * waveOut-backed audio output for PopGB, plus the native Sound
- * Config dialog. Design note vs. the sister ports' shared ce_audio.c,
- * which this dialog's UI mechanics were ported
- * from: that file needs a lock-protected ring buffer and a dedicated
- * drain thread because its libretro cores hand over audio in bulk
- * batches from inside retro_run(), at a fixed rate the device's own
- * output rate must be resampled to. gnuboy is different on both counts
- * - sound_mix() (sound.c) calls pcm_submit() (this file) directly,
- * synchronously, exactly once per pcm.buf's worth of samples, already
- * generated at whatever rate pcm.hz names (sound_reset() recomputes the
- * generation rate from it - see the port's dev notes) - so there is no separate
- * core rate to resample from, and the existing single-thread,
- * bounded-wait-for-a-free-waveOut-buffer design (proven on real
- * hardware by this port's previous minimal sys/ce/ce_audio.c) already
- * has everything the sister ports needed a thread for. This file keeps
- * that design and just adds more buffers (for a finer-grained occupancy
- * reading) plus Volume/Bits/Quality post-processing on the copy into
- * each waveOut buffer.
+ * Config dialog.
+ *
+ * sound_mix() (sound.c, core, unmodified) hands its samples to
+ * pcm_submit() (ce_audio.c), which only copies them into a
+ * single-producer/single-consumer ring buffer and returns. A dedicated
+ * thread (CeAudioThreadProc) drains the ring, applies Volume/Bits/
+ * Quality and makes the waveOutWrite() calls, so the emulation thread
+ * never waits on the waveOut driver - see ce_audio.c's header comment
+ * for why. The ring size is Sound Config's Buffer setting (32/64/128/
+ * 256 KB, 64 KB by default).
+ *
+ * There is no resampler: gnuboy generates samples at whatever rate
+ * pcm.hz names, so a Rate change just sets pcm.hz, calls sound_reset()
+ * and reopens the waveOut device at the new rate.
+ *
+ * The dialog's control mechanics (the "-/value/+" spinners, the
+ * physical-key focus loop) are ported from the sister ports' Sound
+ * Config.
  */
 #ifndef CE_AUDIO_H
 #define CE_AUDIO_H
@@ -44,13 +45,12 @@ void CeShowSoundConfigDialog(HWND owner);
  * of whether a device is open (no-op if not). */
 void CeAudioPrimeSilence(unsigned ms);
 
-/* Fraction of this port's waveOut buffers currently queued/playing,
- * 0..100 - consumed by ce_video.c's vid_begin() to decide whether to
- * skip this frame's rendering (see the port's dev notes' frame-skip design:
- * skip while audio is comfortably ahead, force a render if the skip
- * streak hits the Frame Skip setting's cap so audio doesn't play
- * against a completely frozen screen). Safe to call every frame
- * regardless of whether a device is open (0 if not). */
+/* How full the audio ring is - not-yet-played audio as a percentage of
+ * the current ring size, 0..100. Consumed by ce_video.c's vid_end():
+ * while this is at or below its threshold, vid_end() skips the blit to
+ * the screen, up to the Frame Skip setting's count in a row, then forces
+ * one so audio doesn't play against a completely frozen screen. Safe to
+ * call every frame regardless of whether a device is open (0 if not). */
 unsigned CeAudioGetBufferOccupancyPercent(void);
 
 /* True while a waveOut device is actually open (pcm_init()'s
