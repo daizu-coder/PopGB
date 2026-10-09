@@ -36,7 +36,8 @@ PopGB 全体は、上流の gnuboy と同じ条件の GNU General Public License
 
 ゲームの ROM は同梱していません。
 
-## ビルド方法、使用方法 → [sys/ce/README.md](../sys/ce/README.md)
+## ビルド方法、使用方法
+(→ [sys/ce/README.md](../sys/ce/README.md) にあります)
 
 ## クレジット
 
