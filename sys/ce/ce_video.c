@@ -325,7 +325,7 @@ unsigned CeVideoGetAndResetBlitMs(void)
  * writes - just a GetTickCount() pair around BlitToScreen()'s body.
  * Every CE_FRAMESKIP-affected build still counts one entry per blit
  * that actually ran, so with Frame Skip on the window covers fewer than
- * s_blitPerfCount emu-frames; at Frame Skip 0 (the default) it's 1:1.
+ * s_blitPerfCount emu-frames; at Frame Skip 0 it's 1:1.
  * The last completed 60-blit avg/max is snapshotted for ce_main.c to
  * fold into its line via CeVideoGetBlitPerf(). */
 #define CE_BLIT_PERF_WINDOW 60
@@ -533,7 +533,7 @@ int CeVideoGetLastImage(const void **pixels, unsigned *width, unsigned *height, 
 /* 0 = off (never skips); 1..30 = the maximum number of consecutive
  * frames vid_end() is allowed to skip the physical blit for while the
  * audio ring is comfortably ahead. */
-static int s_frameSkip = 0;
+static int s_frameSkip = 2;
 static int s_skipStreak = 0;
 
 /* Skip while the ring is at or below this fraction full - a rendered
