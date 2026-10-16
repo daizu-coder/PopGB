@@ -213,18 +213,19 @@ static int LoadRom(const char *path)
 	return 1;
 }
 
-/* Returns 0 if the user backed out of the picker without choosing
- * anything, or if the chosen ROM failed to load (LoadRom() has already
- * shown the error) - g_romLoaded is untouched by a plain cancel (stays
- * whatever it already was), so the caller can tell "nothing changed"
- * apart from "the ROM that was running is now gone" by checking it. */
-static int PickAndLoadRom(void)
+/* Returns -1 if the user backed out of the picker without choosing
+ * anything (g_romLoaded is untouched - nothing changed), 0 if the chosen
+ * ROM failed to load (LoadRom() has already shown the error), 1 on
+ * success. owner is the window the picker is shown over (the main menu),
+ * so a cancel hands focus straight back to it - same as the sister
+ * PopNES/PopSNES/PopSG/PopPCE ports' LoadRomFlow(hDlg). */
+static int PickAndLoadRom(HWND owner)
 {
 	wchar_t wpath[MAX_PATH];
 	char path[MAX_PATH * 2];
 
-	if (!CeShowFileOpenDialog(g_hwnd, wpath, MAX_PATH))
-		return 0;
+	if (!CeShowFileOpenDialog(owner, wpath, MAX_PATH))
+		return -1;
 
 	/* CP_UTF8, not CP_ACP - loader.c's saveprefix (used for SRAM/RTC/
 	 * state files) is built from this narrow path, and sys/ce/compat/
@@ -1072,7 +1073,11 @@ static INT_PTR CALLBACK MainMenuDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
 		switch (LOWORD(wParam))
 		{
 		case IDC_MM_OPEN:
-			PickAndLoadRom();
+			/* A cancelled pick (Back key or the picker's X) stays on this
+			 * menu - user request, v1.1.0. A pick that loaded, or one that
+			 * failed to load, closes the menu as before. */
+			if (PickAndLoadRom(hDlg) < 0)
+				return TRUE;
 			EndDialog(hDlg, IDC_MM_OPEN);
 			return TRUE;
 
