@@ -154,7 +154,7 @@ static const unsigned kRateChoices[] = { 8000, 11025, 22050, 32000, 44100 };
 static const unsigned kBufferChoices[] = { 32768, 65536, 131072, 262144 };
 #define CE_BUFFER_CHOICE_COUNT (sizeof(kBufferChoices) / sizeof(kBufferChoices[0]))
 
-static int s_volumeLevel = 10;   /* 0..10; 0 = silent */
+static int s_volumeLevel = 8;    /* 0..10; 0 = silent. Default 8 like the sister Pop ports (was 10 until 2026-10-17) */
 static int s_volumeScale = 256;  /* 0..256 fixed-point, recomputed from the above */
 static int s_rateHz      = 44100;
 static int s_bitDepth    = 16;   /* 8 or 16 - waveOut output format only, pcm.buf itself is always 8-bit unsigned */
