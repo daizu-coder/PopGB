@@ -45,6 +45,7 @@
 #include "rc.h"
 #include "hw.h"
 #include "loader.h"
+#include "mem.h"
 #include "emu.h"
 #include "fb.h"
 #include "sys.h"
@@ -257,7 +258,8 @@ static int PickAndLoadRom(HWND owner)
 #define CE_MSGBOX_MAX_TEXT 128
 static wchar_t s_msgBoxText[CE_MSGBOX_MAX_TEXT];
 
-#define CE_MSGBOX_MAX_LINE 32
+#define CE_MSGBOX_MAX_LINE  64 /* was 32; 64 like the sister PopNES port, for IDD_CONFIRM_LONG's wider lines */
+#define CE_MSGBOX_MAX_LINES 4
 
 /* Splits text into at most two lines that each fit within maxWidth
  * (real pixels - see WM_PAINT below for why this can just trust
@@ -301,6 +303,89 @@ static void WrapMsgBoxText(const wchar_t *text, int maxWidth,
 	line1[split] = L'\0';
 	wcsncpy(line2, text + split, lineCap - 1);
 	line2[lineCap - 1] = L'\0';
+}
+
+/* Word-wraps text into up to maxLines lines of at most maxWidth real
+ * pixels each, filling lines[i][0..CE_MSGBOX_MAX_LINE-1]. Greedy: each
+ * line takes as many characters as fit, breaking at the last ASCII space
+ * on the line when there is one (so English breaks between words;
+ * Japanese has no spaces and just hard-breaks). At least one character
+ * always goes on a line even if it alone overflows. A '\n' in the text
+ * always starts a new line. Any remainder past the final line is
+ * dropped. Returns the number of lines used (>=1).
+ * Ported from the sister PopNES port for IDD_CONFIRM_LONG only - the
+ * other dialogs here keep the 2-line WrapMsgBoxText above. */
+static int WrapMsgBoxLines(const wchar_t *text, int maxWidth,
+                           wchar_t lines[][CE_MSGBOX_MAX_LINE], int maxLines)
+{
+	int count = 0;
+	const wchar_t *p = text;
+
+	while (*p && count < maxLines)
+	{
+		int fit = 0, lastSpace = -1, i;
+		wchar_t probe[CE_MSGBOX_MAX_LINE];
+
+		for (i = 0; p[i] && p[i] != L'\n' && i < CE_MSGBOX_MAX_LINE - 1; i++)
+		{
+			probe[i] = p[i];
+			probe[i + 1] = L'\0';
+			if (CeBmpFontGetTextWidth(probe) > maxWidth)
+				break;
+			fit = i + 1;
+			if (p[i] == L' ')
+				lastSpace = i + 1;
+		}
+
+		if (p[fit] == L'\0' || p[fit] == L'\n') /* rest (of this line) fits */
+			;
+		else if (lastSpace > 0)         /* break after the last space */
+			fit = lastSpace;
+		else if (fit == 0)              /* one over-wide char - force it */
+			fit = 1;
+
+		wcsncpy(lines[count], p, fit);
+		lines[count][fit] = L'\0';
+		count++;
+
+		p += fit;
+		if (*p == L'\n')                /* a line break in the text */
+			p++;
+		else
+			while (*p == L' ')          /* swallow the wrapped space */
+				p++;
+	}
+
+	if (count == 0)
+	{
+		lines[0][0] = L'\0';
+		count = 1;
+	}
+	return count;
+}
+
+/* Draws up to `count` pre-wrapped lines centered both ways in rc. */
+static void PaintMsgBoxLines(HDC hdc, const RECT *rc,
+                             wchar_t lines[][CE_MSGBOX_MAX_LINE], int count)
+{
+	COLORREF fg = GetSysColor(COLOR_WINDOWTEXT);
+	int lineH  = CE_BMPFONT_HEIGHT + 2;
+	int rectW  = rc->right - rc->left;
+	int rectH  = rc->bottom - rc->top;
+	int blockH = count * CE_BMPFONT_HEIGHT + (count - 1) * (lineH - CE_BMPFONT_HEIGHT);
+	int y = rc->top + (rectH - blockH) / 2;
+	int i;
+
+	if (y < rc->top)   /* a block taller than rc grows downward, not up under the title bar */
+		y = rc->top;
+
+	SetBkMode(hdc, TRANSPARENT);
+	for (i = 0; i < count; i++)
+	{
+		int x = rc->left + (rectW - CeBmpFontGetTextWidth(lines[i])) / 2;
+		CeBmpFontDrawTextW(hdc, x, y, lines[i], fg);
+		y += lineH;
+	}
 }
 
 static WNDPROC s_pMsgBoxOkOrigProc = NULL;
@@ -598,6 +683,232 @@ static void CeShowMsgBox(HWND owner, const wchar_t *text)
 	 * real MessageBoxW(), so nothing extra is needed after it returns. */
 	DialogBoxW((HINSTANCE)GetWindowLongPtrW(owner, GWLP_HINSTANCE),
 	           MAKEINTRESOURCEW(IDD_MSGBOX), owner, MsgBoxDlgProc);
+}
+
+/* ------------------------------------------------------------------ */
+/* Load State: ask first when the load would change the in-game save   */
+/* (ported from the sister PopNES port)                                */
+/* ------------------------------------------------------------------ */
+
+/* Keeps the save RAM as it was before a Save State load that changes it
+ * (CeLoadStateFlow, after the player chose Load) as
+ * "<ROM path>.backup1.srm" - next to the .srm, which loader.c names the
+ * same way - shifting the older ones to backup2/backup3 so the last
+ * three are kept. The new copy goes to a .tmp file first and only
+ * replaces backup1 once it is fully written, so a power-off mid-write
+ * can't cost the previous backups. Written while the menu is up (the
+ * game and the sound are paused). The times go to the log in one line
+ * after everything is done - CeLog() itself opens and closes the log
+ * file on the same card. Same as the sister PopNES port's
+ * CeBackupSram(). Returns 1 on success. */
+static int CeBackupSram(const void *data, size_t size)
+{
+	wchar_t tmpPath[MAX_PATH + 24];
+	wchar_t b1[MAX_PATH + 24], b2[MAX_PATH + 24], b3[MAX_PATH + 24];
+	DWORD t0, tClosed, tEnd;
+	FILE *f;
+	size_t wrote;
+	int closeErr;
+
+	_snwprintf(tmpPath, MAX_PATH + 24, L"%s.backup.tmp", g_romPathW);
+	_snwprintf(b1, MAX_PATH + 24, L"%s.backup1.srm", g_romPathW);
+	_snwprintf(b2, MAX_PATH + 24, L"%s.backup2.srm", g_romPathW);
+	_snwprintf(b3, MAX_PATH + 24, L"%s.backup3.srm", g_romPathW);
+	tmpPath[MAX_PATH + 23] = b1[MAX_PATH + 23] = b2[MAX_PATH + 23] = b3[MAX_PATH + 23] = L'\0';
+
+	t0 = GetTickCount();
+	f = _wfopen(tmpPath, L"wb");
+	if (!f)
+	{
+		CeLog("CeBackupSram: failed to open the .tmp file for write");
+		return 0;
+	}
+	wrote = fwrite(data, 1, size, f);
+	closeErr = fclose(f);
+	tClosed = GetTickCount();
+	if (wrote != size || closeErr != 0)
+	{
+		DeleteFileW(tmpPath);
+		CeLog("CeBackupSram: write failed (%lu of %lu bytes, fclose %d)",
+		      (unsigned long)wrote, (unsigned long)size, closeErr);
+		return 0;
+	}
+
+	/* A missing backup2/backup3 (the first few backups) is normal. */
+	DeleteFileW(b3);
+	MoveFileW(b2, b3);
+	MoveFileW(b1, b2);
+	if (!MoveFileW(tmpPath, b1))
+	{
+		CeLog("CeBackupSram: can't rename the .tmp file to backup1 (error %lu)",
+		      (unsigned long)GetLastError());
+		return 0;
+	}
+	tEnd = GetTickCount();
+
+	CeLog("CeBackupSram: saved %lu bytes - write+fclose %lums, rotate %lums, total %lums",
+	      (unsigned long)size, (unsigned long)(tClosed - t0),
+	      (unsigned long)(tEnd - tClosed), (unsigned long)(tEnd - t0));
+	return 1;
+}
+
+/* Load State's warning when the load would change the game's own
+ * in-cartridge save (CeLoadStateFlow). IDD_CONFIRM_LONG: IDD_CONFIRM's
+ * text area holds only two lines, and Save State's own question stays
+ * on IDD_CONFIRM. Same keys (ConfirmBtnCtrlProc), but the buttons say
+ * Load/Cancel (IDC_CF_YES/IDC_CF_NO); Cancel has the focus first, and
+ * the Back key also cancels. On Load it writes the backup
+ * (CeBackupSram) while still on screen; if that fails it says so in
+ * place and waits for Load/Cancel again, the same way SaveStateDlgProc
+ * shows its result - never closing and opening a second dialog over the
+ * main menu. Ported from the sister PopNES port. */
+static const void *s_rbOldSram = NULL; /* NULL = no backup to write (no .srm yet) */
+static size_t      s_rbOldSramSize = 0;
+static int         s_rbAskedAgain = 0; /* 1 = the backup failed, now showing that */
+
+static INT_PTR CALLBACK SramRollbackDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	switch (msg)
+	{
+	case WM_INITDIALOG:
+		s_ssPhase = 0; /* ConfirmBtnCtrlProc's arrow keys move between the two buttons */
+		s_rbAskedAgain = 0;
+		ShowWindow(GetDlgItem(hDlg, IDC_CF_TEXT), SW_HIDE);
+		SetDlgItemTextW(hDlg, IDC_CF_YES, CeLangIsJapanese() ? L"\x30ed\x30fc\x30c9" /* ロード */ : L"Load");
+		SetDlgItemTextW(hDlg, IDC_CF_NO,  CeLangIsJapanese() ? L"\x3084\x3081\x308b" /* やめる */ : L"Cancel");
+		s_pConfirmBtnOrigProc = (WNDPROC)GetWindowLongPtrW(GetDlgItem(hDlg, IDC_CF_YES), GWLP_WNDPROC);
+		SetWindowLongPtrW(GetDlgItem(hDlg, IDC_CF_YES), GWLP_WNDPROC, (LONG_PTR)ConfirmBtnCtrlProc);
+		SetWindowLongPtrW(GetDlgItem(hDlg, IDC_CF_NO),  GWLP_WNDPROC, (LONG_PTR)ConfirmBtnCtrlProc);
+		SetActiveWindow(hDlg);
+		SetFocus(GetDlgItem(hDlg, IDC_CF_NO));
+		return FALSE;
+
+	case WM_DRAWITEM:
+		CeBmpFontDrawOwnerButton((const DRAWITEMSTRUCT *)lParam);
+		return TRUE;
+
+	case WM_PAINT:
+	{
+		PAINTSTRUCT ps;
+		HDC hdc;
+		RECT rc;
+		wchar_t lines[CE_MSGBOX_MAX_LINES][CE_MSGBOX_MAX_LINE];
+		int count;
+
+		hdc = BeginPaint(hDlg, &ps);
+		GetWindowRect(GetDlgItem(hDlg, IDC_CF_TEXT), &rc);
+		MapWindowPoints(NULL, hDlg, (POINT *)&rc, 2);
+
+		count = WrapMsgBoxLines(s_msgBoxText, rc.right - rc.left, lines, CE_MSGBOX_MAX_LINES);
+		PaintMsgBoxLines(hdc, &rc, lines, count);
+
+		EndPaint(hDlg, &ps);
+		return TRUE;
+	}
+
+	case WM_COMMAND:
+		switch (LOWORD(wParam))
+		{
+		case IDC_CF_YES:
+			if (!s_rbAskedAgain && s_rbOldSram &&
+			    !CeBackupSram(s_rbOldSram, s_rbOldSramSize))
+			{
+				wcsncpy(s_msgBoxText, CeLangIsJapanese()
+				        ? L"\x30d0\x30c3\x30af\x30a2\x30c3\x30d7\x3092\x4f5c\x308c\x307e\x305b\x3093\x3067\x3057\x305f\x3002" /* バックアップを作れませんでした。 */
+				        : L"Could not make a backup of your in-game save.",
+				        CE_MSGBOX_MAX_TEXT - 1);
+				s_msgBoxText[CE_MSGBOX_MAX_TEXT - 1] = L'\0';
+				s_rbAskedAgain = 1;
+				InvalidateRect(hDlg, NULL, TRUE);
+				SetFocus(GetDlgItem(hDlg, IDC_CF_NO));
+				return TRUE;
+			}
+			EndDialog(hDlg, 1);
+			return TRUE;
+		case IDC_CF_NO:
+		case IDCANCEL:
+			EndDialog(hDlg, 0);
+			return TRUE;
+		}
+		return FALSE;
+
+	default:
+		return FALSE;
+	}
+}
+
+/* Returns 1 for Load, 0 for Cancel. oldSram is the save RAM from before
+ * the load, to back up on Load - NULL when the game has no .srm yet (no
+ * backup). */
+static int CeConfirmSramRollback(HWND owner, const void *oldSram, size_t size)
+{
+	int yes;
+
+	wcsncpy(s_msgBoxText, CeLangIsJapanese()
+	        ? L"\x30b2\x30fc\x30e0\x306e\x4e2d\x306e\x30bb\x30fc\x30d6\x304c\x3001\x30b9\x30c6\x30fc\x30c8\x30bb\x30fc\x30d6\x524d\x306e\x3001\n\x6700\x5f8c\x306e\x30bb\x30fc\x30d6\x306b\x623b\x308a\x307e\x3059\x3002\n(\x203b\x65b0\x3057\x3044\x30bb\x30fc\x30d6\x306f\x6d88\x3048\x307e\x3059\x3002)" /* ゲームの中のセーブが、ステートセーブ前の、(改行)最後のセーブに戻ります。(改行)(※新しいセーブは消えます。) */
+	        : L"Your in-game save will go back to your last save before this state was made.",
+	        CE_MSGBOX_MAX_TEXT - 1);
+	s_msgBoxText[CE_MSGBOX_MAX_TEXT - 1] = L'\0';
+
+	s_rbOldSram = oldSram;
+	s_rbOldSramSize = size;
+	yes = DialogBoxW((HINSTANCE)GetWindowLongPtrW(owner, GWLP_HINSTANCE),
+	                 MAKEINTRESOURCEW(IDD_CONFIRM_LONG), owner, SramRollbackDlgProc) == 1;
+	s_rbOldSram = NULL;
+	return yes;
+}
+
+/* Main menu's Load State. Games with battery-backed save RAM only:
+ * before loading, check whether the state would take the game's own
+ * in-cartridge save back (the state carries the whole cartridge RAM -
+ * loader.c's state_sram_would_change() compares the state file's copy
+ * with the RAM now, without loading). Only then warn first; on Cancel
+ * nothing is loaded at all, so the game, its sound and its clock stay
+ * exactly as they were, and the menu stays open. On Load the backup is
+ * written from the RAM as it still is (not while the game has no .srm
+ * yet - there is no save to protect), then the state is loaded as
+ * before. A game without one loads exactly as in v1.1.1. The clock
+ * (.rtc) is not compared or backed up. Returns 1 when it went on to the
+ * load (the menu then closes, as before, even if the load failed), 0 on
+ * Cancel. */
+static int CeLoadStateFlow(HWND owner)
+{
+	int ok;
+
+	if (mbc.batt)
+	{
+		size_t sramSize = (size_t)8192 * mbc.ramsize;
+		int change;
+
+		CeLog("CeLoadStateFlow: save RAM is %lu bytes", (unsigned long)sramSize);
+		change = state_sram_would_change(-1);
+		if (change > 0)
+		{
+			int backup = sram_backup_ok();
+
+			if (!backup)
+				CeLog("CeLoadStateFlow: no .srm yet (or it couldn't be read) - no backup will be written");
+			if (!CeConfirmSramRollback(owner, backup ? (const void *)ram.sbank : NULL, sramSize))
+			{
+				CeLog("CeLoadStateFlow: in-game save would change - player chose Cancel, not loaded");
+				return 0;
+			}
+		}
+		else if (change == 0)
+			CeLog("CeLoadStateFlow: in-game save unchanged");
+	}
+
+	/* Same reasoning as Save State - a missing save file (nothing saved
+	 * yet) or a read failure used to look exactly like "the button did
+	 * nothing" from the player's side, with the menu just closing back
+	 * to gameplay in whatever state it was already in. */
+	ok = state_load(-1);
+	CeLog("IDC_MM_LOADSTATE: state_load() -> %d, path=\"%s\"",
+	      ok, loader_get_last_state_path());
+	CeShowMsgBox(owner,
+	             ok ? (CeLangIsJapanese() ? L"\x30ed\x30fc\x30c9\x3057\x307e\x3057\x305f\x3002" /* ロードしました。 */ : L"State loaded.")
+	                : (CeLangIsJapanese() ? L"\x30ed\x30fc\x30c9\x306b\x5931\x6557\x3057\x307e\x3057\x305f\x3002" /* ロードに失敗しました。 */ : L"Load failed."));
+	return 1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1090,20 +1401,11 @@ static INT_PTR CALLBACK MainMenuDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
 			return TRUE;
 
 		case IDC_MM_LOADSTATE:
-			if (g_romLoaded)
-			{
-				/* Same reasoning as Save above - a missing save file
-				 * (nothing saved yet) or a read failure used to look
-				 * exactly like "the button did nothing" from the
-				 * player's side, with the menu just closing back to
-				 * gameplay in whatever state it was already in. */
-				int ok = state_load(-1);
-				CeLog("IDC_MM_LOADSTATE: state_load() -> %d, path=\"%s\"",
-				      ok, loader_get_last_state_path());
-				CeShowMsgBox(hDlg,
-				             ok ? (CeLangIsJapanese() ? L"\x30ed\x30fc\x30c9\x3057\x307e\x3057\x305f\x3002" /* ロードしました。 */ : L"State loaded.")
-				                : (CeLangIsJapanese() ? L"\x30ed\x30fc\x30c9\x306b\x5931\x6557\x3057\x307e\x3057\x305f\x3002" /* ロードに失敗しました。 */ : L"Load failed."));
-			}
+			/* Loads, shows the result and closes back to gameplay, as
+			 * before. Cancel in the in-game-save warning (see
+			 * CeLoadStateFlow) loads nothing and leaves the menu open. */
+			if (g_romLoaded && !CeLoadStateFlow(hDlg))
+				return TRUE;
 			EndDialog(hDlg, IDC_MM_LOADSTATE);
 			return TRUE;
 

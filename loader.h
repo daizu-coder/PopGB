@@ -46,6 +46,13 @@ void loader_set_error(char *fmt, ...);
 int state_save(int n);
 int state_load(int n);
 
+/* Load State's check before a load (see loader.c): would loading slot
+ * n change the cartridge RAM (1 yes, 0 no, -1 no state file), and is
+ * the RAM a save worth backing up (the game has a .srm/.sav that was
+ * read in full). */
+int state_sram_would_change(int n);
+int sram_backup_ok(void);
+
 /* Path attempted by the most recent state_save()/state_load() call - see
  * loader.c for why this exists (diagnosing an fopen() failure that is
  * otherwise silent). */

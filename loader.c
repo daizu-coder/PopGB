@@ -653,19 +653,22 @@ int state_save(int n)
 }
 
 
-int state_load(int n)
+/* The file a load of slot n reads (n < 0: saveslot). Slot 0: while
+ * there is no .state, the legacy .000 instead (never written or
+ * removed). A .state that is there but can't be opened is a failed
+ * load, not a reason to fall back. who names the caller in the log.
+ * Returns a malloc()ed path. */
+static char *state_load_name(int n, const char *who)
 {
-	FILE *f;
 	char *name;
-	int ok = 0;
+#ifndef UNDER_CE
+	FILE *f;
+#endif
 
 	if (n < 0) n = saveslot;
 	if (n < 0) n = 0;
 	name = state_name(n);
 
-	/* Slot 0: while there is no .state, read the legacy .000 instead
-	 * (never written or removed). A .state that is there but can't be
-	 * opened is a failed load, not a reason to fall back. */
 	if (n == 0)
 	{
 #ifdef UNDER_CE
@@ -678,9 +681,20 @@ int state_load(int n)
 			free(name);
 			name = malloc(strlen(saveprefix) + 5);
 			sprintf(name, "%s.%03d", saveprefix, 0);
-			SAVE_LOG("state_load: no .state yet, trying %s", name);
+			SAVE_LOG("%s: no .state yet, trying %s", who, name);
 		}
 	}
+	(void)who;
+	return name;
+}
+
+int state_load(int n)
+{
+	FILE *f;
+	char *name;
+	int ok = 0;
+
+	name = state_load_name(n, "state_load");
 	snprintf(s_lastStatePath, sizeof s_lastStatePath, "%s", name);
 
 	if ((f = fopen(name, "rb")))
@@ -695,6 +709,78 @@ int state_load(int n)
 	}
 	free(name);
 	return ok;
+}
+
+/* Whether loading slot n (n < 0: saveslot) would change the cartridge
+ * RAM, found without loading anything: reads the state file's SRAM
+ * block the way save.c's loadstate() does - the block number from the
+ * "sram" entry of the 4KB header, then (mbc.ramsize << 1) 4KB blocks -
+ * and compares it with ram.sbank 4KB at a time. Lets the CE frontend
+ * ask before a load that would take the game's own save back, and on
+ * Cancel simply not load: putting a loaded state back would go through
+ * state_load() again, whose sound_dirty() restarts the channels'
+ * length and envelope counters. The clock (struct rtc) is not part of
+ * ram.sbank, so it is not compared. Returns 1 if it would change -
+ * also when the header has no "sram" entry, since loadstate() would
+ * then read from whatever block it used last - 0 if not, -1 if there
+ * is no state file or it can't be opened (state_load() then fails the
+ * same way). Only meaningful while mbc.batt. */
+int state_sram_would_change(int n)
+{
+	FILE *f;
+	char *name;
+	byte buf[4096];
+	un32 (*header)[2] = (un32 (*)[2])buf;
+	int j, i, got, block = -1, result = 0;
+	int srl = mbc.ramsize << 1;
+
+	if (!ram.sbank) return 0;
+
+	name = state_load_name(n, "state_sram_would_change");
+	f = fopen(name, "rb");
+	if (!f)
+	{
+		SAVE_LOG("state_sram_would_change: can't open %s", name);
+		free(name);
+		return -1;
+	}
+	free(name);
+
+	memset(buf, 0, sizeof buf);
+	fread(buf, 4096, 1, f);
+	for (j = 0; j < 4096 / 8 && header[j][0]; j++)
+		if (!memcmp(&header[j][0], "sram", 4))
+			block = LIL(header[j][1]); /* the last one wins, as in loadstate() */
+	if (block < 0)
+	{
+		SAVE_LOG("state_sram_would_change: no \"sram\" entry in the header - counted as a change");
+		fclose(f);
+		return 1;
+	}
+
+	fseek(f, (long)block << 12, SEEK_SET);
+	for (i = 0; i < srl; i++)
+	{
+		got = fread(buf, 1, 4096, f);
+		if (got > 0 && memcmp(buf, (byte *)ram.sbank + (i << 12), got))
+		{
+			result = 1;
+			break;
+		}
+		if (got < 4096) /* loadstate() leaves the rest as it is */
+			break;
+	}
+	fclose(f);
+	return result;
+}
+
+/* 1 while the cartridge RAM is the game's save as read from (or last
+ * written to) its .srm - or its legacy .sav - so a copy of it is worth
+ * keeping as a backup; 0 while the game has no save file yet, or its
+ * save couldn't be read (ram.loaded, see sram_load()). */
+int sram_backup_ok(void)
+{
+	return mbc.batt && ram.loaded && sram_file_exists;
 }
 
 /* Writes the clock only while the game already has a .srm or a .rtc, so
