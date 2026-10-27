@@ -257,6 +257,15 @@ static int ScaleModeToIndex(CeScaleMode m)
 	return 0;
 }
 
+/* Widest destination rect BlitToScreen()'s fixed xLut[] can describe.
+ * A 480-wide screen never reaches it, but a wider one (e.g. a device
+ * left in its high-resolution mode by a launcher other than the
+ * add-on app menu) does in "Full" - ComputeScaleRect() clamps to it
+ * *before* centering, the same order as sister PopSG's
+ * ComputeGeometry(), so the clamped picture stays centered instead of
+ * left-aligned at x=0. */
+#define CE_MAX_DST_W 512
+
 static void ComputeScaleRect(int physW, int physH, int *outX, int *outY, int *outW, int *outH)
 {
 	int w, h;
@@ -289,6 +298,7 @@ static void ComputeScaleRect(int physW, int physH, int *outX, int *outY, int *ou
 	if (h > physH) h = physH;
 	if (w < 1) w = 1;
 	if (h < 1) h = 1;
+	if (w > CE_MAX_DST_W) w = CE_MAX_DST_W;
 
 	*outW = w;
 	*outH = h;
@@ -370,7 +380,7 @@ static void BlitToScreen(void)
 	HWND hwnd;
 	static int dstX, dstY, dstW, dstH;
 	static uint32_t xStep, yStep;
-	static int xLut[512];
+	static int xLut[CE_MAX_DST_W];
 	static int identityX; /* 1 when dstW == CE_NATIVE_W: no horizontal
 	                        * scaling, so each row is a straight copy */
 	static int int2x;     /* 1 for the exact-2x mode: broadcast one source
@@ -389,8 +399,7 @@ static void BlitToScreen(void)
 	if (s_scaleGeomDirty)
 	{
 		PatBlt(hdc, 0, 0, s_physW, s_physH, BLACKNESS);
-		ComputeScaleRect(s_physW, s_physH, &dstX, &dstY, &dstW, &dstH);
-		if (dstW > 512) dstW = 512; /* defensive clamp against the fixed xLut size, not expected to trigger on this device */
+		ComputeScaleRect(s_physW, s_physH, &dstX, &dstY, &dstW, &dstH); /* already clamped to CE_MAX_DST_W, the xLut size */
 
 		xStep = ((uint32_t)CE_NATIVE_W << 16) / (uint32_t)dstW;
 		yStep = ((uint32_t)CE_NATIVE_H << 16) / (uint32_t)dstH;
