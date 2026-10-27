@@ -542,7 +542,7 @@ int CeVideoGetLastImage(const void **pixels, unsigned *width, unsigned *height, 
 /* 0 = off (never skips); 1..30 = the maximum number of consecutive
  * frames vid_end() is allowed to skip the physical blit for while the
  * audio ring is comfortably ahead. */
-static int s_frameSkip = 2;
+static int s_frameSkip = 4;
 static int s_skipStreak = 0;
 
 /* Skip while the ring is at or below this fraction full - a rendered
