@@ -230,8 +230,11 @@ END
  * comment (now removed) for why the DLU-to-pixel relationship isn't a
  * simple 1:1 with ce_fileopen.c's WM_MEASUREITEM row height; that
  * mismatch is exactly why the row count is hardware-confirmed per
- * dialog size rather than computed. */
-IDD_FILEOPEN DIALOG 0, 0, 190, 108
+ * dialog size rather than computed.
+ *
+ * Now 190x112 with "<<" / ">>" buttons for the Left/Right page jump by
+ * touch (v1.3.0, see the buttons' own comment below). */
+IDD_FILEOPEN DIALOG 0, 0, 190, 112
 STYLE DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Select ROM"
 FONT 9, "Tahoma"
@@ -241,7 +244,16 @@ BEGIN
      * OK 86 -> 90 - with the Galmuri14 font's 19px rows the 6th row came
      * out cut off on real hardware (PopPCE). */
     LISTBOX               IDC_FO_LIST, 6, 16, 178, 68, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | LBS_HASSTRINGS | LBS_OWNERDRAWFIXED | WS_VSCROLL | WS_TABSTOP
-    DEFPUSHBUTTON "OK",   IDOK,        70, 90, 50, 14, BS_OWNERDRAW
+    /* "<<" / ">>" - touch versions of the Left/Right page jump (user
+     * request, v1.3.0, same layout as the sister PopNES v1.3.0 / PopSNES
+     * v1.3.0 / PopGBA v1.2.0 / PopSG v1.3.0; ce_fileopen.c's
+     * PageFileList()). Not tab stops: the keys never need to land on
+     * them. The three buttons share the full width and are 18 DLU tall so
+     * a fingertip hits them; dialog 108 -> 112 to keep the 4 DLU bottom
+     * margin. */
+    PUSHBUTTON "<<",      IDC_FO_PREV,  6, 90, 56, 18, BS_OWNERDRAW | NOT WS_TABSTOP
+    DEFPUSHBUTTON "OK",   IDOK,        67, 90, 56, 18, BS_OWNERDRAW
+    PUSHBUTTON ">>",      IDC_FO_NEXT, 128, 90, 56, 18, BS_OWNERDRAW | NOT WS_TABSTOP
 END
 
 /* Small generic message box (user request - the real MessageBoxW()
