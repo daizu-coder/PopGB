@@ -43,4 +43,9 @@ void CeInputSuppressUntilReleased(void);
  * the config file; the physical Back key (IDCANCEL) does the same. */
 void CeShowInputConfigDialog(HWND owner);
 
+/* The name Input Config shows for a VK code ("Esc", "Previous", "None"
+ * for 0, "VK_xx" for an unnamed key). The returned string may be a
+ * shared static buffer - copy it before calling again. */
+const wchar_t *CeInputVkLabel(int vk);
+
 #endif

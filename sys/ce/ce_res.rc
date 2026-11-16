@@ -179,8 +179,10 @@ END
  * it's never translated.
  * "Open Last Folder" was removed (user request) - it's now always on,
  * see ce_fileopen.c; Debug Log and OK moved up, height 132->118 (same
- * geometry as the sister PopSG's Video Config after the same removal). */
-IDD_VIDEOCONFIG DIALOG 0, 0, 190, 118
+ * geometry as the sister PopSG's Video Config after the same removal).
+ * Now 190x136 with the main menu key row (v1.4.0, see that row's own
+ * comment below). */
+IDD_VIDEOCONFIG DIALOG 0, 0, 190, 136
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Video Config"
 FONT 9, "Tahoma"
@@ -203,7 +205,23 @@ BEGIN
 
     CHECKBOX    "Enable Debug Log", IDC_VC_DEBUGLOG,      8, 76, 174, 12, BS_OWNERDRAW
 
-    DEFPUSHBUTTON "OK",  IDOK,                          70, 94, 50, 14, BS_OWNERDRAW
+    /* Main menu key: caption and key button on one row, laid out like
+     * the main menu key row of the sister ports' v1.4.0 (button at
+     * x=100, 14 below Debug Log's top; caption 4 below the button's
+     * top). Debug Log is at y=76 here (74 in the sister ports), so the
+     * row sits 2 lower than theirs. "メインメニューキー:" is 140px in
+     * Galmuri14 (English "Main Menu Key:" 119px) and fits left of the
+     * button on PW-G5300 and PW-SH2 (CeOpener 800x480 and add-on app
+     * 480x320) - same layout as PopSG v1.4.0, checked there on hardware
+     * 2026-11-14. The button is 80 wide so "Press key (5)" fits, and 16
+     * tall (not 14 like the other buttons): at 14 the descender of the
+     * "y" in "Press key" was cut off on hardware (PopSNES, 2026-11-16).
+     * OK moved down 18 (94 -> 112) and the dialog grew 118 -> 136,
+     * inside IDD_MAINMENU. */
+    LTEXT       "Main Menu Key:", IDC_VC_LBL_MENUKEY,     8, 94,  90, 12
+    PUSHBUTTON  "None",         IDC_VC_MENUKEY,         100, 90,  80, 16, WS_TABSTOP | BS_OWNERDRAW
+
+    DEFPUSHBUTTON "OK",  IDOK,                          70, 112, 50, 14, BS_OWNERDRAW
 END
 
 /* Custom ROM picker - replaces GetOpenFileNameW() (no Japanese folder/

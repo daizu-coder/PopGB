@@ -28,6 +28,7 @@
 #include "ce_lang.h"
 #include "ce_bmpfont.h"
 #include "ce_resource.h"
+#include "ce_video.h"
 
 #include "hw.h"
 
@@ -95,6 +96,7 @@ void CeInputPoll(void)
 {
     unsigned i;
     byte down = 0; /* accumulated PAD_* bits for this poll, flushed below */
+    int menuVk = CeVideoGetMenuKey();
 
     for (i = 0; i < CE_INPUT_COUNT; i++)
     {
@@ -131,6 +133,13 @@ void CeInputPoll(void)
             }
             pressed = 0;
         }
+
+        /* The Video Config main menu key wins over a game button bound to
+         * the same key: that button does nothing while the key is set as
+         * the main menu key (ce_main.c's doevents() opens the menu when
+         * it's released). */
+        if (s_map[i].vk == menuVk)
+            pressed = 0;
 
         /* OR'd into a single accumulator rather than calling pad_set()
          * per entry directly (the old, single-button-per-row design):
@@ -232,6 +241,13 @@ static const wchar_t *VkToLabel(int vk)
     return fallback;
 }
 
+/* Same names as the Input Config buttons, for Video Config's main menu
+ * key button (ce_video.c). */
+const wchar_t *CeInputVkLabel(int vk)
+{
+    return VkToLabel(vk);
+}
+
 static int CtrlIdToIndex(int ctrlId)
 {
     unsigned i;
@@ -245,9 +261,40 @@ static int CtrlIdToIndex(int ctrlId)
  * a new key. */
 static int s_waitingIndex = -1;
 
+/* The key just captured as a binding, until its WM_KEYUP arrives. Only
+ * WM_KEYDOWN is used for capture; the rest of that key press must not
+ * reach the native BUTTON control afterwards. Space in particular: a
+ * push button treats a Space key-up (or its WM_CHAR) as a click, so
+ * without this the captured Space came back as BN_CLICKED on the same
+ * remap button, which - no longer waiting - started a new wait ("Press
+ * key" again) instead of showing "Space" (PW-SH2/SH5 have a Space key).
+ * Auto-repeat WM_KEYDOWNs of the same key are dropped too.
+ *
+ * PW-SH2 started from CeOpener (800x480) sends a Space press as a
+ * WM_KEYDOWN with VK code 0 (scan code 0) plus WM_CHAR 0x20 - sometimes
+ * hundreds of ms late - while its WM_KEYUP still carries VK_SPACE
+ * (hardware log, 2026-11-14, PopSG). So while waiting, a VK-0 WM_KEYDOWN
+ * is not a key: it only sets s_vk0Down, and the next WM_KEYUP with a
+ * real VK code on the waiting button is captured instead (only after a
+ * VK-0 press, so the key-up of the decide key that started the wait is
+ * still never taken as a binding). WM_CHAR never reaches a remap
+ * button's native proc, and for CE_INPUT_IGNORE_MS after any capture a
+ * late VK-0 WM_KEYDOWN and BN_CLICKED on a remap button are ignored. */
+static int   s_swallowVk    = 0;
+static int   s_vk0Down      = 0; /* a VK-0 WM_KEYDOWN arrived during this wait */
+static int   s_captured     = 0; /* a key was captured since the dialog opened */
+static DWORD s_captureTick  = 0; /* when (valid while s_captured) */
+#define CE_INPUT_IGNORE_MS 1000
+
+static int JustCaptured(void)
+{
+    return s_captured && GetTickCount() - s_captureTick < CE_INPUT_IGNORE_MS;
+}
+
 static void BeginWaitForKey(HWND hDlg, int index)
 {
     s_waitingIndex = index;
+    s_vk0Down      = 0;
     /* Shortened from "Press a key..." (13 chars, then "Press a key" -
      * 11 chars) - real-hardware confirmed both still got clipped
      * ("ress a key.", then a further-reported clip) inside the 52px-
@@ -270,8 +317,13 @@ static void CancelWaitForKey(HWND hDlg)
     EndWaitForKey(hDlg);
 }
 
-static void CaptureKeyAsBinding(HWND hDlg, int index, int vk)
+/* keyIsUp: captured from the WM_KEYUP (the CeOpener case - see
+ * s_swallowVk), so there is no key-up left to swallow. */
+static void CaptureKeyAsBinding(HWND hDlg, int index, int vk, int keyIsUp)
 {
+    s_swallowVk   = keyIsUp ? 0 : vk;
+    s_captured    = 1;
+    s_captureTick = GetTickCount();
     s_map[index].vk = vk;
     SetWindowTextW(GetDlgItem(hDlg, s_map[index].ctrlId), VkToLabel(vk));
     EndWaitForKey(hDlg);
@@ -426,10 +478,45 @@ static LRESULT CALLBACK InputBtnCtrlProc(HWND hWnd, UINT message, WPARAM wParam,
     case WM_GETDLGCODE:
         return DLGC_WANTARROWS | DLGC_WANTALLKEYS;
 
+    case WM_KEYUP:
+        /* The key-up of the key just captured - see s_swallowVk. */
+        if (s_swallowVk != 0 && (int)wParam == s_swallowVk)
+        {
+            s_swallowVk = 0;
+            return 0;
+        }
+        /* CeOpener: the press came as VK 0, the release has the real key. */
+        if (idx >= 0 && idx == s_waitingIndex && s_vk0Down && wParam != 0)
+        {
+            CaptureKeyAsBinding(hDlg, idx, (int)wParam, 1);
+            return 0;
+        }
+        break;
+
+    case WM_CHAR:
+        /* Never to a remap button's native proc (a Space WM_CHAR clicks
+         * it) - see s_swallowVk. OK keeps its native WM_CHAR handling
+         * except right after a capture. */
+        if (idx >= 0 || s_swallowVk != 0 || JustCaptured())
+            return 0;
+        break;
+
     case WM_KEYDOWN:
+        /* Auto-repeat of the key just captured - see s_swallowVk. */
+        if (s_swallowVk != 0 && (int)wParam == s_swallowVk && s_waitingIndex < 0)
+            return 0;
+        /* The late CeOpener VK-0 press of the key just captured. */
+        if (wParam == 0 && s_waitingIndex < 0 && JustCaptured())
+            return 0;
         if (idx >= 0 && idx == s_waitingIndex)
         {
-            CaptureKeyAsBinding(hDlg, idx, (int)wParam);
+            if (wParam == 0)
+            {
+                /* Not a key - wait for its WM_KEYUP (see s_swallowVk). */
+                s_vk0Down = 1;
+                return 0;
+            }
+            CaptureKeyAsBinding(hDlg, idx, (int)wParam, 0);
             return 0;
         }
         switch (wParam)
@@ -472,6 +559,9 @@ static INT_PTR CALLBACK InputConfigDlgProc(HWND hDlg, UINT msg, WPARAM wParam, L
             SetWindowTextW(GetDlgItem(hDlg, s_map[i].ctrlId), VkToLabel(s_map[i].vk));
         ApplyInputConfigLanguage(hDlg);
 
+        s_swallowVk = 0;
+        s_vk0Down   = 0;
+        s_captured  = 0;
         s_pInputOrigProc = (WNDPROC)GetWindowLongPtrW(GetDlgItem(hDlg, IDOK), GWLP_WNDPROC);
         for (i = 0; i < CE_INPUT_COUNT; i++)
             SetWindowLongPtrW(GetDlgItem(hDlg, s_map[i].ctrlId), GWLP_WNDPROC, (LONG_PTR)InputBtnCtrlProc);
@@ -517,6 +607,13 @@ static INT_PTR CALLBACK InputConfigDlgProc(HWND hDlg, UINT msg, WPARAM wParam, L
 
         if (idx >= 0 && HIWORD(wParam) == BN_CLICKED)
         {
+            /* A click that is really the key just captured (still held,
+             * shortly after) - see s_swallowVk. */
+            if (JustCaptured())
+            {
+                CeLog("InputConfigDlgProc: ignored a click within %dms of a capture", CE_INPUT_IGNORE_MS);
+                return TRUE;
+            }
             if (idx == s_waitingIndex)
             {
                 CancelWaitForKey(hDlg);

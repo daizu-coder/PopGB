@@ -50,6 +50,11 @@ void CeVideoResume(void);
 
 void CeShowVideoConfigDialog(HWND owner);
 
+/* Video Config's main menu key: the VK code of the key that opens the
+ * main menu during play (ce_main.c's doevents()), 0 = none (the
+ * default). Saved as "VideoMenuKey". */
+int CeVideoGetMenuKey(void);
+
 /* Redraws the screen from whatever is already sitting in the native
  * buffer, bypassing Frame Skip - see ce_video.c's own comment above its
  * definition for why ce_main.c's WM_PAINT handler needs this now (this

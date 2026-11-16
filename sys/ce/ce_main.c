@@ -20,7 +20,8 @@
  * forward declaration and emu.c) is gnuboy's only per-frame hook into
  * this file: it pumps the window's message queue, polls the keyboard
  * into hw.pad (ce_input.c's CeInputPoll), and asks emu_run() to return
- * (via emu_pause(1)) the moment a screen tap requests the menu - ROM
+ * (via emu_pause(1)) the moment a screen tap or Video Config's main menu
+ * key (see MenuKeyPollReleased()) requests the menu - ROM
  * switching/save-state/config dialogs all happen back in WinMain's own
  * loop, never while emu_run() is still on the call stack.
  */
@@ -1214,6 +1215,20 @@ static LRESULT CALLBACK MainMenuBtnCtrlProc(HWND hWnd, UINT message, WPARAM wPar
 	if (message == WM_GETDLGCODE)
 		return DLGC_WANTARROWS | DLGC_WANTALLKEYS;
 
+	/* PW-SH2 started from CeOpener sends a Space press as WM_KEYDOWN with
+	 * VK code 0 plus WM_CHAR 0x20, sometimes hundreds of ms late - late
+	 * enough to land on this menu after the Space main menu key opened
+	 * it, where the native button took the WM_CHAR as a click on the
+	 * focused button (Open ROM) (hardware log, 2026-11-14, PopSG). The
+	 * menu is driven by WM_KEYDOWN only (below), so neither reaches the
+	 * native proc. Neither does a real VK_SPACE press/release: Space is
+	 * not decide on this menu (see VK_RETURN below), and the native push
+	 * button clicks itself on a Space key-up (hardware log, PopSG: Open
+	 * ROM opened on the WM_KEYUP once WM_CHAR was already dropped). */
+	if ((message == WM_KEYDOWN && wParam == 0) || message == WM_CHAR ||
+	    ((message == WM_KEYDOWN || message == WM_KEYUP) && wParam == VK_SPACE))
+		return 0;
+
 	if (message == WM_KEYDOWN)
 	{
 		switch (wParam)
@@ -1229,7 +1244,14 @@ static LRESULT CALLBACK MainMenuBtnCtrlProc(HWND hWnd, UINT message, WPARAM wPar
 			return 0;
 
 		case VK_RETURN:
-		case VK_SPACE:
+			/* Decide only. Space is not decide on this menu (it was up to
+			 * v1.3.0): started from CeOpener, PW-SH2 sends a Space press
+			 * as VK code 0, so Space pressed Open ROM etc. when started as
+			 * an add-on app but did nothing from CeOpener. Now all Space
+			 * messages are dropped above and it does nothing either way.
+			 * The message/confirm dialogs (MsgBoxBtnCtrlProc, and
+			 * ConfirmBtnCtrlProc for the state-save confirm and the
+			 * state-load confirm) still take Space as decide. */
 			SendMessage(hDlg, WM_COMMAND, MAKEWPARAM(id, BN_CLICKED), (LPARAM)hWnd);
 			return 0;
 
@@ -1442,6 +1464,66 @@ static INT_PTR CALLBACK MainMenuDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
 	}
 }
 
+/* Main menu key (Video Config, ce_video.c's CeVideoGetMenuKey()): during
+ * play, pressing and releasing that key opens the main menu, the same as
+ * tapping the screen - and by the same route: doevents() sets
+ * g_menuRequested (like WndProc's WM_LBUTTONDOWN), then emu_pause(1)
+ * makes emu_run() return and WinMain's loop calls ShowMainMenu() with
+ * emu_run() off the call stack. It opens on release, not on press, so
+ * the held key can't reach the menu dialog (Esc would close it at once,
+ * Enter would press the focused button). After any menu closes
+ * (MenuKeyReset() at the end of ShowMainMenu()) the key must first be
+ * seen released before a press counts, so a menu closed with that same
+ * key (Esc/Enter) doesn't open again the moment the key comes up.
+ *
+ * The key is read with GetAsyncKeyState() once per frame in doevents(),
+ * right after CeInputPoll() reads the game buttons the same way - real
+ * hardware (PW-G5300) reads Back (Esc) and Previous this way during play
+ * (sister ports, 2026-11). A game button bound to the same key is
+ * ignored (ce_input.c's CeInputPoll), so the main menu key wins. */
+static int s_menuKeyArmed   = 0; /* seen released since the last reset */
+static int s_menuKeyWasDown = 0; /* pressed since armed / since the last reset */
+
+static void MenuKeyReset(void)
+{
+	s_menuKeyArmed   = 0;
+	s_menuKeyWasDown = 0;
+}
+
+/* Returns 1 once when the main menu key has just been released after a
+ * press that came after it was seen released. */
+static int MenuKeyPollReleased(void)
+{
+	int vk = CeVideoGetMenuKey();
+	int down;
+
+	if (vk == 0)
+	{
+		MenuKeyReset();
+		return 0;
+	}
+
+	down = (GetAsyncKeyState(vk) & 0x8000) ? 1 : 0;
+	if (down)
+	{
+		if (s_menuKeyArmed && !s_menuKeyWasDown)
+		{
+			s_menuKeyWasDown = 1;
+			CeLog("MenuKey: vk=0x%02X down", (unsigned)vk);
+		}
+		return 0;
+	}
+
+	if (s_menuKeyArmed && s_menuKeyWasDown)
+	{
+		s_menuKeyWasDown = 0;
+		CeLog("MenuKey: vk=0x%02X released - requesting main menu", (unsigned)vk);
+		return 1;
+	}
+	s_menuKeyArmed = 1;
+	return 0;
+}
+
 /* Returns 0 if the user chose Exit, 1 otherwise (resume, or any config/
  * Open ROM/save-state action - g_romLoaded may have changed, WinMain's
  * loop re-checks it before calling emu_run() again). */
@@ -1502,6 +1584,10 @@ static int ShowMainMenu(void)
 	      (unsigned)(UINT_PTR)GetForegroundWindow(), (unsigned)(UINT_PTR)GetActiveWindow(),
 	      (unsigned)(UINT_PTR)GetFocus(), (unsigned)(UINT_PTR)g_hwnd);
 
+	/* Whatever closed the menu (tap, Esc, Enter, the main menu key
+	 * itself), the main menu key has to be seen released again first. */
+	MenuKeyReset();
+
 	return (result != IDC_MM_EXIT);
 }
 
@@ -1514,8 +1600,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 	switch (msg)
 	{
 	case WM_LBUTTONDOWN:
-		/* Touch-to-reveal menu (see the port's dev notes - the Game Boy pad has no
-		 * spare button for a dedicated menu key). Deferred to doevents()
+		/* Touch-to-reveal menu (see the port's dev notes). Since v1.4.0
+		 * a key can open it too - Video Config's main menu key (None by
+		 * default), which doevents() turns into the same g_menuRequested
+		 * request (see MenuKeyPollReleased()). Deferred to doevents()
 		 * instead of showing the dialog right here: this runs from
 		 * inside emu_run()'s own DispatchMessageW() call (see doevents()
 		 * below), and Open ROM/state load need loader_unload()+
@@ -1890,6 +1978,12 @@ void doevents(void)
 #endif
 
 	CeInputPoll();
+
+	/* Main menu key - requested here the same way as a tap's
+	 * WM_LBUTTONDOWN (the PeekMessageW loop above), handled by the
+	 * g_menuRequested check at the end of this function. */
+	if (MenuKeyPollReleased())
+		g_menuRequested = 1;
 #ifdef CE_PERF_DIAG
 	s_perfInputPollMs += (unsigned)(GetTickCount() - stageStart);
 #endif
